@@ -3,28 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>客服滿意度分析系統（登入雲端整合版）</title>
+  <title>客服電話紀錄長期觀察系統（雲端主版｜週整合版）</title>
+
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
-  <script src="https://unpkg.com/xlsx-js-style/dist/xlsx.bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
     body { font-family: 'Inter', 'PingFang TC', 'Microsoft JhengHei', sans-serif; }
-    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-    .sticky-col { position: sticky; left: 0; background: white; z-index: 10; border-right: 2px solid #f1f5f9; }
-    .id-column { word-break: break-all; min-width: 260px; }
+    .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
     .chart-wrap { position: relative; height: 360px; }
     th { white-space: nowrap; }
+    textarea { resize: vertical; }
   </style>
 </head>
 <body class="bg-slate-100">
@@ -33,14 +35,13 @@
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
-// ===== Firebase =====
 const firebaseConfig = {
-  apiKey: "AIzaSyC8dSoxbHeMCf-G-nGpiWdNG2tWdvj9EwA",
-  authDomain: "cs-satisfaction.firebaseapp.com",
-  projectId: "cs-satisfaction",
-  storageBucket: "cs-satisfaction.firebasestorage.app",
-  messagingSenderId: "497242789333",
-  appId: "1:497242789333:web:57305b7ca78a0fe4a1d95c"
+  apiKey: "AIzaSyBxsGrXmiKTgkaxAdvDrs77snZa9aCaXns",
+  authDomain: "weekly-call-report-system.firebaseapp.com",
+  projectId: "weekly-call-report-system",
+  storageBucket: "weekly-call-report-system.firebasestorage.app",
+  messagingSenderId: "990132235942",
+  appId: "1:990132235942:web:9fed449aee1d9928f0ce67"
 };
 
 let firebaseReady = false;
@@ -53,1057 +54,1411 @@ try {
   db = firebase.firestore();
   firebaseReady = true;
 } catch (e) {
-  console.warn('Firebase init failed', e);
+  console.warn("Firebase init failed", e);
 }
 
-const AGENT_CONFIG = {
-  '早班': ['蘇清源', '曾雪妮', '鄭宇嫻', '陳怡君', '李欣曄', '蔡家佳', '程馨慧'],
-  '中班': ['黃婷鈺', '蔡筑琁', '呂建璋', '吳金韋', '許堯恩', '林廷坤'],
-  '晚班': ['李珮君', '黃君為', '呂宜庭']
+const EMPTY_SHIFT_RULES = { default: { "早班": [], "中班": [], "晚班": [] } };
+const EMPTY_CSV_RESULT = {
+  rawCount: 0,
+  validCount: 0,
+  agentCount: 0,
+  detailRows: [],
+  handleRows: [],
+  speakRows: []
+};
+const EMPTY_CLOUD_STORE = { rows: [], weeks: {}, months: {}, years: {}, detailByWeek: {} };
+const EMPTY_PREVIEW_META = {
+  mode: "none",
+  title: "尚未載入資料",
+  weekKeys: [],
+  monthKeys: [],
+  yearKeys: [],
+  sourceCount: 0,
+  recordCountBeforeDedupe: 0,
+  recordCountAfterDedupe: 0
 };
 
-const AGENT_TO_SHIFT = Object.entries(AGENT_CONFIG).reduce((acc, [shift, names]) => {
-  names.forEach(name => acc[name] = shift);
-  return acc;
-}, {});
-
-const ALL_AGENTS = Object.keys(AGENT_TO_SHIFT);
-const QUEUE_LIST = ['GT', '儲值專線', 'GT+儲值專線', '滿貫專線', '金好運專線'];
-
-const RANK_METRICS = [
-  { label: '人員滿意度(Q1)', key: 'q1SatRate' },
-  { label: '人員調查率(Q1)', key: 'q1SurRate' },
-  { label: '問題滿意度(Q2)', key: 'q2SatRate' },
-  { label: '問題調查率(Q2)', key: 'q2SurRate' },
-  { label: '整體滿意度平均', key: 'overallSatAvg' },
-  { label: '整體調查率平均', key: 'overallSurAvg' }
-];
-
+const SUMMARY_HEADERS = ["客服名稱", "班別", "GT專線", "儲值專線", "GT+儲值專線", "滿貫專線", "金好運專線", "總計"];
 const HISTORY_METRICS = [
-  { label: '整體滿意度平均', key: 'overallSatAvg', format: 'percent' },
-  { label: '整體調查率平均', key: 'overallSurAvg', format: 'percent' },
-  { label: '人員滿意度(Q1)', key: 'q1SatRate', format: 'percent' },
-  { label: '人員調查率(Q1)', key: 'q1SurRate', format: 'percent' },
-  { label: '問題滿意度(Q2)', key: 'q2SatRate', format: 'percent' },
-  { label: '問題調查率(Q2)', key: 'q2SurRate', format: 'percent' },
-  { label: '總通話數', key: 'totalCalls', format: 'number' },
-  { label: 'GT時數', key: 'GT', source: 'lines', format: 'hours' },
-  { label: '儲值專線時數', key: '儲值專線', source: 'lines', format: 'hours' },
-  { label: 'GT+儲值專線時數', key: 'GT+儲值專線', source: 'lines', format: 'hours' },
-  { label: '滿貫專線時數', key: '滿貫專線', source: 'lines', format: 'hours' },
-  { label: '金好運專線時數', key: '金好運專線', source: 'lines', format: 'hours' }
+  { label: "整體滿意度平均", key: "overallSatAvg", format: "percent" },
+  { label: "整體調查率平均", key: "overallSurAvg", format: "percent" },
+  { label: "人員滿意度(Q1)", key: "q1SatRate", format: "percent" },
+  { label: "人員調查率(Q1)", key: "q1SurRate", format: "percent" },
+  { label: "問題滿意度(Q2)", key: "q2SatRate", format: "percent" },
+  { label: "問題調查率(Q2)", key: "q2SurRate", format: "percent" },
+  { label: "總通話數", key: "totalCalls", format: "number" },
+  { label: "GT時數", key: "GT專線", source: "lines", format: "hours" },
+  { label: "儲值專線時數", key: "儲值專線", source: "lines", format: "hours" },
+  { label: "GT+儲值專線時數", key: "GT+儲值專線", source: "lines", format: "hours" },
+  { label: "滿貫專線時數", key: "滿貫專線", source: "lines", format: "hours" },
+  { label: "金好運專線時數", key: "金好運專線", source: "lines", format: "hours" }
 ];
-
-const CHART_COLORS = ['#2563eb','#16a34a','#dc2626','#ca8a04','#7c3aed','#0891b2','#ea580c','#4f46e5','#be123c','#0f766e','#9333ea','#65a30d'];
-
-const Icon = ({ name, size = 18, className = "" }) => {
-  useEffect(() => {
-    if (window.lucide) window.lucide.createIcons();
-  }, [name]);
-  return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
-};
-
-function HistoryChart({ type = 'line', labels = [], datasets = [], title = '' }) {
-  const canvasRef = useRef(null);
-  const chartRef = useRef(null);
-
-  useEffect(() => {
-    if (!canvasRef.current || !window.Chart) return;
-    if (chartRef.current) chartRef.current.destroy();
-
-    const safeType = labels.length <= 1 ? 'bar' : type;
-
-    chartRef.current = new window.Chart(canvasRef.current, {
-      type: safeType,
-      data: { labels, datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { display: true, position: 'top' },
-          title: { display: !!title, text: title },
-          tooltip: {
-            callbacks: {
-              label: (context) => {
-                const value = context.raw;
-                return `${context.dataset.label}：${typeof value === 'number' ? value.toFixed(2) : value}`;
-              }
-            }
-          }
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            ticks: {
-              callback: (value) => Number(value).toFixed(2)
-            }
-          }
-        }
-      }
-    });
-
-    return () => {
-      if (chartRef.current) chartRef.current.destroy();
-    };
-  }, [type, labels.join('|'), JSON.stringify(datasets), title]);
-
-  return <div className="chart-wrap"><canvas ref={canvasRef}></canvas></div>;
-}
-
-const createBorder = () => ({
-  top: { style: 'thin', color: { rgb: 'D9E2F3' } },
-  bottom: { style: 'thin', color: { rgb: 'D9E2F3' } },
-  left: { style: 'thin', color: { rgb: 'D9E2F3' } },
-  right: { style: 'thin', color: { rgb: 'D9E2F3' } }
-});
-
-const ensureCellStyle = (cell) => {
-  if (!cell.s) cell.s = {};
-  return cell.s;
-};
 
 const formatPercent = (n) => `${Number(n || 0).toFixed(2)}%`;
 const formatToHours = (seconds) => (Number(seconds || 0) / 3600).toFixed(2);
 
+const normalizeMonthKey = (value) => {
+  if (!value) return "";
+  const m = String(value).trim().match(/^(\d{4})[-\/](\d{1,2})$/);
+  if (!m) return "";
+  return `${m[1]}-${String(m[2]).padStart(2, "0")}`;
+};
+
+const parseNameList = (text) => String(text || "").split(/[、,，\n]/).map(s => s.trim()).filter(Boolean);
+const stringifyNameList = (arr) => (arr || []).join("、");
+const formatDateKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const formatCustomDate = (dateStr) => {
+  if (!dateStr) return "";
+  const parts = String(dateStr).split(/[-/]/);
+  if (parts.length >= 3) return `${parts[0]}/${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`;
+  return dateStr;
+};
+
+const formatWeekKeyZh = (weekKey) => {
+  const m = String(weekKey || "").match(/^(\d{4})-W(\d{2})$/);
+  if (!m) return weekKey || "";
+  return `${m[1]}年第${parseInt(m[2], 10)}週`;
+};
+
+const formatWeekDisplay = (weekKey, weekLabel = "") => {
+  const zh = formatWeekKeyZh(weekKey);
+  if (!weekLabel) return zh;
+  return `${zh}（${String(weekLabel).replace(/\s*~\s*/g, "～")}）`;
+};
+
+const formatMonthDisplay = (monthKey = "") => {
+  const m = String(monthKey || "").match(/^(\d{4})-(\d{2})$/);
+  if (!m) return monthKey || "";
+  return `${m[1]}年${m[2]}月`;
+};
+
+const formatYearDisplay = (yearKey = "") => {
+  return yearKey ? `${yearKey}年` : "";
+};
+
+const TREND_COLORS = [
+  { border: "#2563eb", bg: "rgba(37,99,235,0.18)" },
+  { border: "#16a34a", bg: "rgba(22,163,74,0.18)" },
+  { border: "#dc2626", bg: "rgba(220,38,38,0.18)" },
+  { border: "#9333ea", bg: "rgba(147,51,234,0.18)" },
+  { border: "#ea580c", bg: "rgba(234,88,12,0.18)" },
+  { border: "#0891b2", bg: "rgba(8,145,178,0.18)" }
+];
+
+const toDate = (dateStr, timeStr = "00:00:00") => {
+  if (!dateStr) return null;
+  const safeDate = String(dateStr).replace(/\//g, "-");
+  const safeTime = timeStr || "00:00:00";
+  const dt = new Date(`${safeDate}T${safeTime.length === 5 ? safeTime + ":00" : safeTime}`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+};
+
+const getWeekInfo = (dateStr, timeStr = "00:00:00") => {
+  const dt = toDate(dateStr, timeStr);
+  if (!dt) return null;
+  const clone = new Date(dt);
+  clone.setHours(0, 0, 0, 0);
+  const day = clone.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(clone);
+  monday.setDate(clone.getDate() + diffToMonday);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const firstThursday = new Date(monday);
+  firstThursday.setDate(monday.getDate() + 3);
+  const weekYear = firstThursday.getFullYear();
+  const jan4 = new Date(weekYear, 0, 4);
+  const jan4Day = jan4.getDay() || 7;
+  const firstWeekMonday = new Date(jan4);
+  firstWeekMonday.setDate(jan4.getDate() - jan4Day + 1);
+  const weekNo = Math.floor((monday - firstWeekMonday) / 604800000) + 1;
+  const mondayLabel = `${monday.getFullYear()}/${monday.getMonth() + 1}/${monday.getDate()}`;
+  const sundayLabel = `${sunday.getFullYear()}/${sunday.getMonth() + 1}/${sunday.getDate()}`;
+  return {
+    weekKey: `${weekYear}-W${String(weekNo).padStart(2, "0")}`,
+    weekLabel: `${mondayLabel} ~ ${sundayLabel}`,
+    monday: formatDateKey(monday),
+    sunday: formatDateKey(sunday)
+  };
+};
+
+const getCalendarYearKey = (dateStr) => {
+  if (!dateStr) return "";
+  const safe = String(dateStr).replace(/\//g, "-");
+  const m = safe.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  return m ? m[1] : "";
+};
+
+const getCalendarMonthKey = (dateStr) => {
+  if (!dateStr) return "";
+  const safe = String(dateStr).replace(/\//g, "-");
+  const m = safe.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  return m ? `${m[1]}-${String(m[2]).padStart(2, "0")}` : "";
+};
+
+const parseDuration = (val) => {
+  if (val == null || val === "") return 0;
+  const s = String(val).trim();
+  if (/^\d+(\.\d+)?$/.test(s)) return Math.round(Number(s));
+  const hms = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (hms) return Number(hms[1]) * 3600 + Number(hms[2]) * 60 + Number(hms[3] || 0);
+  const zh = s.match(/(?:(\d+)\s*小時)?\s*(?:(\d+)\s*分)?\s*(?:(\d+)\s*秒)?/);
+  if (zh && (zh[1] || zh[2] || zh[3])) return Number(zh[1] || 0) * 3600 + Number(zh[2] || 0) * 60 + Number(zh[3] || 0);
+  return 0;
+};
+
+const normalizeHeaderText = (s) => String(s || "").trim().replace(/\s+/g, "").replace(/[：:]/g, "");
+const parseSimpleCsvLine = (line) => {
+  const result = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === "," && !inQuotes) {
+      result.push(cur); cur = "";
+    } else cur += ch;
+  }
+  result.push(cur);
+  return result;
+};
+
+const parseSimpleCsv = (text) => {
+  const lines = String(text || "").replace(/^\uFEFF/, "").split(/\r?\n/).filter(Boolean);
+  if (!lines.length) return [];
+  const headers = parseSimpleCsvLine(lines[0]);
+  return lines.slice(1).map(line => {
+    const cols = parseSimpleCsvLine(line);
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = cols[i] ?? ""; });
+    return obj;
+  });
+};
+
+const getRowValueByAliases = (rawRow) => {
+  const headers = Object.keys(rawRow || {});
+  const indexMap = {};
+  headers.forEach(h => { indexMap[normalizeHeaderText(h)] = h; });
+  const pick = (names) => {
+    for (const n of names) {
+      const hit = indexMap[normalizeHeaderText(n)];
+      if (hit != null) return rawRow[hit];
+    }
+    return "";
+  };
+  return {
+    direction: pick(["初始方向", "方向", "Initial direction"]),
+    datetime: pick(["日期", "日期時間", "Date"]),
+    agent: pick(["使用者 - 已互動", "使用者-已互動", "使用者", "客服名稱"]),
+    line: pick(["第一佇列", "遊戲專線", "第一字句"]),
+    handleTime: pick(["總處理時間", "處理時間"]),
+    speakTime: pick(["總發話時間", "通話時長"]),
+    tags: pick(["外部標籤", "滿意度"]),
+    dialogId: pick(["對話 ID", "對話ID"])
+  };
+};
+
+const parseDateTimeValue = (value) => {
+  if (value == null || value === "") return { date: "", time: "" };
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, "0");
+    const d = String(value.getDate()).padStart(2, "0");
+    const hh = String(value.getHours()).padStart(2, "0");
+    const mm = String(value.getMinutes()).padStart(2, "0");
+    const ss = String(value.getSeconds()).padStart(2, "0");
+    return { date: `${y}-${m}-${d}`, time: `${hh}:${mm}:${ss}` };
+  }
+  if (typeof value === "number" && window.XLSX && window.XLSX.SSF) {
+    try {
+      const parsed = window.XLSX.SSF.parse_date_code(value);
+      if (parsed) {
+        const y = parsed.y;
+        const m = String(parsed.m).padStart(2, "0");
+        const d = String(parsed.d).padStart(2, "0");
+        const hh = String(parsed.H || 0).padStart(2, "0");
+        const mm = String(parsed.M || 0).padStart(2, "0");
+        const ss = String(Math.floor(parsed.S || 0)).padStart(2, "0");
+        return { date: `${y}-${m}-${d}`, time: `${hh}:${mm}:${ss}` };
+      }
+    } catch (e) {}
+  }
+  const raw = String(value || "").trim();
+  if (!raw) return { date: "", time: "" };
+  const normalized = raw.replace(/-/g, "/");
+  const parts = normalized.split(/\s+/);
+  let dateStr = parts[0];
+  let timeStr = parts.length >= 2 ? parts[1].slice(0, 8) : "";
+  const dParts = dateStr.split("/");
+  if (dParts.length === 3) dateStr = `${dParts[0]}-${String(dParts[1]).padStart(2, "0")}-${String(dParts[2]).padStart(2, "0")}`;
+  else dateStr = dateStr.replace(/\//g, "-");
+  if (timeStr && timeStr.length === 5) timeStr += ":00";
+  return { date: dateStr, time: timeStr };
+};
+
+const normalizeLineName = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const v = raw.replace(/^\d+[_-]?/, "");
+  if (v.includes("GT")) return "GT專線";
+  if (v.includes("儲值")) return "儲值專線";
+  if (v.includes("滿貫")) return "滿貫專線";
+  if (v.includes("金好運")) return "金好運專線";
+  return v.endsWith("專線") ? v : `${v}專線`;
+};
+
+const normalizeSurveyAnswer = (value) => {
+  const t = String(value || "").trim();
+  return ["非常滿意", "尚可", "不滿意", "非常不滿意"].includes(t) ? t : "未回答";
+};
+
+const extractSatisfaction = (tagText) => {
+  const text = String(tagText || "").trim();
+  let q1 = "";
+  let q2 = "";
+  if (text) {
+    const parts = text.split(/[;,，]/).map(v => v.trim()).filter(Boolean);
+    for (const p of parts) {
+      const m1 = p.match(/^問題?1(.+)$/);
+      const m2 = p.match(/^問題?2(.+)$/);
+      if (m1) q1 = m1[1].trim();
+      if (m2) q2 = m2[1].trim();
+    }
+  }
+  return { q1: normalizeSurveyAnswer(q1), q2: normalizeSurveyAnswer(q2) };
+};
+
+const makeRowUniqueKey = (row) => [
+  String(row.id || "").trim(),
+  String(row.agent || "").trim(),
+  String(row.date || "").trim(),
+  String(row.time || "").trim()
+].join("||");
+
+const dedupeRows = (rows = []) => {
+  const map = new Map();
+  rows.forEach(row => {
+    const key = makeRowUniqueKey(row);
+    if (!map.has(key)) map.set(key, row);
+  });
+  return Array.from(map.values());
+};
+
+const getDuplicateCount = (rows = []) => rows.length - dedupeRows(rows).length;
+
+const readSpreadsheetRows = async (file) => {
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  if (ext === "csv") return parseSimpleCsv(await file.text());
+  if (ext === "xlsx" || ext === "xls") {
+    const arrayBuffer = await file.arrayBuffer();
+    const workbook = window.XLSX.read(arrayBuffer, { type: "array", cellDates: true });
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) return [];
+    const sheet = workbook.Sheets[firstSheetName];
+    return window.XLSX.utils.sheet_to_json(sheet, { defval: "", raw: true });
+  }
+  throw new Error("不支援的檔案格式");
+};
+
+const convertDetailRowsToRows = (detailRows = []) => detailRows.map(row => {
+  const date = row["來電日期"] || "";
+  const time = row["來電時間"] || "";
+  const weekInfo = getWeekInfo(date, time || "00:00:00");
+  const monthKey = getCalendarMonthKey(date);
+  const handleDuration = Number(row["總處理秒數"] || 0);
+  const speakDuration = Number(row["總發話秒數"] || 0);
+  return {
+    agent: row["客服名稱"] || "",
+    shift: row["班別"] || "",
+    shiftSource: row["班別來源"] || "",
+    date,
+    time,
+    monthKey,
+    yearKey: getCalendarYearKey(date),
+    weekKey: weekInfo?.weekKey || "",
+    weekLabel: weekInfo?.weekLabel || "",
+    weekStart: weekInfo?.monday || "",
+    weekEnd: weekInfo?.sunday || "",
+    line: row["遊戲專線"] || "",
+    q1: row["滿意度問題1"] || "未回答",
+    q2: row["滿意度問題2"] || "未回答",
+    id: row["對話ID"] || "",
+    handleDuration,
+    speakDuration,
+    duration: speakDuration
+  };
+});
+
+const buildSummaryRowsFromSource = (rows = [], type = "handle") => {
+  const map = new Map();
+  const durationKey = type === "handle" ? "handleDuration" : "speakDuration";
+  rows.forEach(row => {
+    const agent = row.agent || "";
+    if (!agent) return;
+    if (!map.has(agent)) {
+      map.set(agent, {
+        "客服名稱": agent,
+        "班別": row.shift || "",
+        "GT專線": 0,
+        "儲值專線": 0,
+        "GT+儲值專線": 0,
+        "滿貫專線": 0,
+        "金好運專線": 0,
+        "總計": 0
+      });
+    }
+    const target = map.get(agent);
+    target["班別"] = target["班別"] || row.shift || "";
+    const sec = Number(row[durationKey] || 0);
+    if ((row.line || "").includes("GT")) {
+      target["GT專線"] += sec;
+      target["GT+儲值專線"] += sec;
+    }
+    if ((row.line || "").includes("儲值")) {
+      target["儲值專線"] += sec;
+      target["GT+儲值專線"] += sec;
+    }
+    if ((row.line || "").includes("滿貫")) target["滿貫專線"] += sec;
+    if ((row.line || "").includes("金好運")) target["金好運專線"] += sec;
+    target["總計"] += sec;
+  });
+  return Array.from(map.values()).sort((a, b) => a["客服名稱"].localeCompare(b["客服名稱"], "zh-Hant"));
+};
+
+const summarizePreviewRows = (rows = []) => ({
+  detailRows: rows,
+  handleRows: buildSummaryRowsFromSource(rows, "handle"),
+  speakRows: buildSummaryRowsFromSource(rows, "speak")
+});
+
+const makeCsvResultFromPreviewRows = (rows = [], rawCount = 0) => {
+  const summary = summarizePreviewRows(rows);
+  return {
+    rawCount: Number(rawCount || rows.length || 0),
+    validCount: rows.length,
+    agentCount: Array.from(new Set(rows.map(r => r.agent).filter(Boolean))).length,
+    detailRows: summary.detailRows.map(r => ({
+      "客服名稱": r.agent || "",
+      "班別": r.shift || "",
+      "來電日期": r.date || "",
+      "來電時間": r.time || "",
+      "遊戲專線": r.line || "",
+      "滿意度問題1": r.q1 || "未回答",
+      "滿意度問題2": r.q2 || "未回答",
+      "對話ID": r.id || "",
+      "總處理秒數": Number(r.handleDuration || 0),
+      "總發話秒數": Number(r.speakDuration || 0)
+    })),
+    handleRows: summary.handleRows,
+    speakRows: summary.speakRows
+  };
+};
+
+const chunkArray = (arr = [], size = 300) => {
+  const result = [];
+  for (let i = 0; i < arr.length; i += size) result.push(arr.slice(i, i + size));
+  return result;
+};
+
+const getRowDateSortValue = (row = {}) => {
+  const date = String(row.date || row["來電日期"] || "").trim();
+  const time = String(row.time || row["來電時間"] || "00:00:00").trim() || "00:00:00";
+  const dt = toDate(date, time);
+  return dt ? dt.getTime() : 0;
+};
+
+const getReportContentSortValue = (item = {}, rows = []) => {
+  let maxTime = 0;
+  (rows || []).forEach(row => {
+    const t = getRowDateSortValue(row);
+    if (t > maxTime) maxTime = t;
+  });
+  if (maxTime > 0) return maxTime;
+
+  const monthKeys = Array.isArray(item.monthKeys) ? item.monthKeys.filter(Boolean) : [];
+  if (monthKeys.length) return monthKeys.slice().sort().at(-1) + '-31';
+
+  const weekKeys = Array.isArray(item.weekKeys) ? item.weekKeys.filter(Boolean) : [];
+  if (weekKeys.length) return weekKeys.slice().sort().at(-1);
+
+  const yearKeys = Array.isArray(item.yearKeys) ? item.yearKeys.filter(Boolean) : [];
+  if (yearKeys.length) return yearKeys.slice().sort().at(-1) + '-12-31';
+
+  return Number(item.createdAtMillis || item.createdAt?.seconds || 0);
+};
+
+const normalizeStoredRow = (row = {}) => {
+  const baseDate = row.date || row["來電日期"] || "";
+  const baseTime = row.time || row["來電時間"] || "00:00:00";
+  const info = getWeekInfo(baseDate, baseTime || "00:00:00");
+  const monthKey = getCalendarMonthKey(baseDate) || normalizeMonthKey(row.monthKey || "");
+  const yearKey = getCalendarYearKey(baseDate) || String(row.yearKey || "");
+  const handleDuration = Number(row.handleDuration || row["總處理秒數"] || 0);
+  const speakDuration = Number(row.speakDuration || row["總發話秒數"] || row.duration || 0);
+  return {
+    agent: row.agent || row["客服名稱"] || "",
+    shift: row.shift || row["班別"] || "",
+    shiftSource: row.shiftSource || row["班別來源"] || "",
+    date: baseDate,
+    time: row.time || row["來電時間"] || "",
+    monthKey,
+    yearKey,
+    weekKey: info?.weekKey || row.weekKey || "",
+    weekLabel: info?.weekLabel || row.weekLabel || "",
+    weekStart: info?.monday || row.weekStart || "",
+    weekEnd: info?.sunday || row.weekEnd || "",
+    line: row.line || row["遊戲專線"] || "",
+    q1: row.q1 || row["滿意度問題1"] || "未回答",
+    q2: row.q2 || row["滿意度問題2"] || "未回答",
+    id: row.id || row["對話ID"] || "",
+    handleDuration,
+    speakDuration,
+    duration: speakDuration
+  };
+};
+
+const Icon = ({ name, size = 18, className = "" }) => {
+  useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
+  return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+};
+
+function HistoryChart({ type = "line", labels = [], datasets = [], title = "" }) {
+  const canvasRef = useRef(null);
+  const chartRef = useRef(null);
+  useEffect(() => {
+    if (!canvasRef.current || !window.Chart) return;
+    if (chartRef.current) chartRef.current.destroy();
+    chartRef.current = new window.Chart(canvasRef.current, {
+      type,
+      data: { labels, datasets },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: !!title, text: title }, legend: { display: true } } }
+    });
+    return () => chartRef.current && chartRef.current.destroy();
+  }, [type, JSON.stringify(labels), JSON.stringify(datasets), title]);
+  return <div className="chart-wrap"><canvas ref={canvasRef}></canvas></div>;
+}
+
 function App() {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(!firebaseReady);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loginError, setLoginError] = useState('');
-  const [syncStatus, setSyncStatus] = useState(firebaseReady ? '尚未登入' : '目前為本機模式');
-
-  const [data, setData] = useState([]);
-  const [activeTab, setActiveTab] = useState('analysis');
-  const [loading, setLoading] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [historyData, setHistoryData] = useState({});
-  const [selectedHistoryMonth, setSelectedHistoryMonth] = useState('');
-  const [showUploadPanel, setShowUploadPanel] = useState(false);
-  const [detailByMonth, setDetailByMonth] = useState({});
-  const [masterViewMode, setMasterViewMode] = useState('current');
-  const [masterSelectedMonth, setMasterSelectedMonth] = useState('');
-
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [syncStatus, setSyncStatus] = useState(firebaseReady ? "尚未登入" : "目前為本機模式");
+  const [activeTab, setActiveTab] = useState("shift");
+  const [shiftRules, setShiftRules] = useState(EMPTY_SHIFT_RULES);
+  const [cloudMasterStore, setCloudMasterStore] = useState(EMPTY_CLOUD_STORE);
+  const [csvResult, setCsvResult] = useState(EMPTY_CSV_RESULT);
+  const [csvFileName, setCsvFileName] = useState("");
+  const [previewRows, setPreviewRows] = useState([]);
+  const [previewMeta, setPreviewMeta] = useState(EMPTY_PREVIEW_META);
+  const [shiftMonthInput, setShiftMonthInput] = useState("");
+  const [shiftEditorMonth, setShiftEditorMonth] = useState("default");
+  const [shiftDraft, setShiftDraft] = useState({ "早班": "", "中班": "", "晚班": "" });
+  const [viewType, setViewType] = useState("weeks");
+  const [selectedMetric, setSelectedMetric] = useState("overallSatAvg");
+  const [selectedAgent, setSelectedAgent] = useState("");
   const [selectedYears, setSelectedYears] = useState([]);
   const [selectedMonths, setSelectedMonths] = useState([]);
-  const [selectedAgents, setSelectedAgents] = useState([]);
-  const [selectedMetric, setSelectedMetric] = useState('overallSatAvg');
-  const [singleTrendAgent, setSingleTrendAgent] = useState('');
-  const [compareMode, setCompareMode] = useState('multi');
-  const [yearCompareAgent, setYearCompareAgent] = useState('');
-  const [compareYearA, setCompareYearA] = useState('');
-  const [compareYearB, setCompareYearB] = useState('');
-  const [compareView, setCompareView] = useState('monthly');
-
-  // 用來追蹤曾經自動勾選過的項目，避免覆蓋使用者的手動清除
-  const prevAvailableYears = useRef([]);
-  const prevAvailableMonths = useRef([]);
-  const prevAvailableAgents = useRef([]);
+  const [selectedWeeks, setSelectedWeeks] = useState([]);
+  const [selectedDetailMode, setSelectedDetailMode] = useState("weeks");
+  const [selectedDetailWeek, setSelectedDetailWeek] = useState("");
+  const [selectedDetailMonth, setSelectedDetailMonth] = useState("");
+  const [selectedDetailYear, setSelectedDetailYear] = useState("");
+  const [trendCompareMode, setTrendCompareMode] = useState("single");
+  const [selectedTrendAgents, setSelectedTrendAgents] = useState([]);
+  const [cloudIndex, setCloudIndex] = useState([]);
+  const [selectedCloudItems, setSelectedCloudItems] = useState([]);
+  const [uploadMessage, setUploadMessage] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadMode, setUploadMode] = useState("auto");
+  const [cloudLoadMonth, setCloudLoadMonth] = useState("");
+  const [weeklyExportMode, setWeeklyExportMode] = useState("preview");
+  const [weeklyExportWeek, setWeeklyExportWeek] = useState("");
+  const [weeklyExportMonth, setWeeklyExportMonth] = useState("");
+  const [weeklyExportYear, setWeeklyExportYear] = useState("");
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('cs_sat_history');
-      if (saved) setHistoryData(JSON.parse(saved));
-      const savedDetails = localStorage.getItem('cs_sat_detail_by_month');
-      if (savedDetails) setDetailByMonth(JSON.parse(savedDetails));
+      const savedRules = localStorage.getItem("weekly_call_project_shift_rules");
+      if (savedRules) setShiftRules(JSON.parse(savedRules));
+    } catch (e) {}
+
+    try {
+      localStorage.removeItem("weekly_call_project_cloud_master_store");
     } catch (e) {}
   }, []);
 
+  const getAllAgentsFromShiftRules = useCallback(() => {
+    const set = new Set();
+    Object.values(shiftRules || {}).forEach(group => Object.values(group || {}).forEach(names => (names || []).forEach(n => set.add(n))));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hant"));
+  }, [shiftRules]);
+
+  const getShiftInfoByMonth = useCallback((agentName, monthKey, existingShift = "") => {
+    const normalizedMonth = normalizeMonthKey(monthKey);
+    const monthRules = shiftRules[normalizedMonth];
+    if (monthRules) {
+      for (const [shift, names] of Object.entries(monthRules)) {
+        if ((names || []).includes(agentName)) return { shift, source: "月份班表" };
+      }
+    }
+    const defaultRules = shiftRules.default || EMPTY_SHIFT_RULES.default;
+    for (const [shift, names] of Object.entries(defaultRules)) {
+      if ((names || []).includes(agentName)) return { shift, source: "default 班表" };
+    }
+    if (existingShift) return { shift: existingShift, source: "雲端舊資料" };
+    return { shift: "", source: "未設定" };
+  }, [shiftRules]);
+
+  const getShiftByMonth = useCallback((agentName, monthKey, existingShift = "") => {
+    return getShiftInfoByMonth(agentName, monthKey, existingShift).shift;
+  }, [getShiftInfoByMonth]);
+
+  const saveShiftRules = async (rules) => {
+    setShiftRules(rules);
+    localStorage.setItem("weekly_call_project_shift_rules", JSON.stringify(rules));
+    if (firebaseReady && user && db) {
+      try {
+        setSyncStatus("班表同步中...");
+        await db.collection("weekly_call_project").doc("shift_rules").set({ rules }, { merge: true });
+        setSyncStatus("☁️ 班表已同步 ✓");
+      } catch (e) {
+        console.error(e);
+        setSyncStatus("班表同步失敗");
+      }
+    }
+  };
+
+  const buildAgentStats = useCallback((rows, periodMonthKey = "") => {
+    const agentBase = {};
+    getAllAgentsFromShiftRules().forEach(name => {
+      agentBase[name] = {
+        name, shift: getShiftByMonth(name, periodMonthKey), totalCalls: 0,
+        q1Answered: 0, q1Satisfied: 0, q2Answered: 0, q2Satisfied: 0,
+        lines: { "GT專線": 0, "儲值專線": 0, "GT+儲值專線": 0, "滿貫專線": 0, "金好運專線": 0 }
+      };
+    });
+
+    rows.forEach(d => {
+      if (!agentBase[d.agent]) {
+        agentBase[d.agent] = {
+          name: d.agent,
+          shift: d.shift || getShiftByMonth(d.agent, d.monthKey || periodMonthKey),
+          totalCalls: 0, q1Answered: 0, q1Satisfied: 0, q2Answered: 0, q2Satisfied: 0,
+          lines: { "GT專線": 0, "儲值專線": 0, "GT+儲值專線": 0, "滿貫專線": 0, "金好運專線": 0 }
+        };
+      }
+      const a = agentBase[d.agent];
+      a.shift = d.shift || a.shift;
+      a.totalCalls++;
+      if (["非常滿意", "尚可", "不滿意", "非常不滿意"].includes(d.q1)) { a.q1Answered++; if (["非常滿意", "尚可"].includes(d.q1)) a.q1Satisfied++; }
+      if (["非常滿意", "尚可", "不滿意", "非常不滿意"].includes(d.q2)) { a.q2Answered++; if (["非常滿意", "尚可"].includes(d.q2)) a.q2Satisfied++; }
+      const lineDuration = Number(d.speakDuration || d.duration || 0);
+      if ((d.line || "").includes("GT")) { a.lines["GT專線"] += lineDuration; a.lines["GT+儲值專線"] += lineDuration; }
+      if ((d.line || "").includes("儲值")) { a.lines["儲值專線"] += lineDuration; a.lines["GT+儲值專線"] += lineDuration; }
+      if ((d.line || "").includes("滿貫")) a.lines["滿貫專線"] += lineDuration;
+      if ((d.line || "").includes("金好運")) a.lines["金好運專線"] += lineDuration;
+    });
+
+    return Object.values(agentBase).map(a => {
+      const q1SatRate = a.q1Answered ? (a.q1Satisfied / a.q1Answered) * 100 : 0;
+      const q1SurRate = a.totalCalls ? (a.q1Answered / a.totalCalls) * 100 : 0;
+      const q2SatRate = a.q2Answered ? (a.q2Satisfied / a.q2Answered) * 100 : 0;
+      const q2SurRate = a.totalCalls ? (a.q2Answered / a.totalCalls) * 100 : 0;
+      return { ...a, q1SatRate, q1SurRate, q2SatRate, q2SurRate, overallSatAvg: (q1SatRate + q2SatRate) / 2, overallSurAvg: (q1SurRate + q2SurRate) / 2 };
+    });
+  }, [getAllAgentsFromShiftRules, getShiftByMonth]);
+
+  const buildPeriodSummary = useCallback((rows, periodKey, periodLabel, extra = {}) => {
+    const periodMonthKey = rows[0]?.monthKey || extra.month || "";
+    const analysisList = buildAgentStats(rows, periodMonthKey);
+    const lineTotals = { "GT專線": 0, "儲值專線": 0, "GT+儲值專線": 0, "滿貫專線": 0, "金好運專線": 0 };
+    analysisList.forEach(a => Object.keys(lineTotals).forEach(k => { lineTotals[k] += a.lines[k]; }));
+    let satTotal = 0, satCount = 0, surTotal = 0, surCount = 0, teamTotalCalls = 0;
+    analysisList.forEach(a => {
+      teamTotalCalls += a.totalCalls;
+      if (a.q1Answered > 0 || a.q2Answered > 0) { satTotal += a.overallSatAvg; satCount++; }
+      if (a.totalCalls > 0) { surTotal += a.overallSurAvg; surCount++; }
+    });
+    return { periodKey, periodLabel, overallSatAvg: satCount ? satTotal / satCount : 0, overallSurAvg: surCount ? surTotal / surCount : 0, teamTotalCalls, teamLineTime: lineTotals, agents: analysisList, ...extra };
+  }, [buildAgentStats]);
+
+  const fetchRowsFromReportDoc = useCallback(async (itemOrDoc) => {
+    const item = typeof itemOrDoc.data === 'function' ? { id: itemOrDoc.id, ...itemOrDoc.data() } : itemOrDoc;
+    if (!item) return [];
+    if (Array.isArray(item.rows) && item.rows.length) return item.rows;
+    if (item.rowStorage === 'chunks') {
+      const chunksSnap = await db.collection('weekly_call_project_reports').doc(item.id).collection('rows_chunks').orderBy('chunkIndex').get();
+      let rows = [];
+      chunksSnap.forEach(doc => {
+        const data = doc.data() || {};
+        if (Array.isArray(data.rows)) rows = rows.concat(data.rows);
+      });
+      return rows;
+    }
+    if (Array.isArray(item.csvResult?.detailRows) && item.csvResult.detailRows.length) return convertDetailRowsToRows(item.csvResult.detailRows);
+    return [];
+  }, []);
+
+  const deleteReportWithChunks = useCallback(async (reportId) => {
+    const chunksSnap = await db.collection('weekly_call_project_reports').doc(reportId).collection('rows_chunks').get();
+    if (!chunksSnap.empty) {
+      let batch = db.batch();
+      let count = 0;
+      for (const doc of chunksSnap.docs) {
+        batch.delete(doc.ref);
+        count += 1;
+        if (count >= 400) {
+          await batch.commit();
+          batch = db.batch();
+          count = 0;
+        }
+      }
+      if (count > 0) await batch.commit();
+    }
+    await db.collection('weekly_call_project_reports').doc(reportId).delete();
+  }, []);
+
+  const loadCloudBundle = async (opts = { autoPreview: true }) => {
+    if (!firebaseReady || !user || !db) return;
+    const autoPreview = opts.autoPreview !== false;
+    try {
+      setSyncStatus("雲端資料讀取中...");
+      const reportsSnap = await db.collection("weekly_call_project_reports").get();
+      const rawItems = reportsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const reportRowsMap = new Map();
+      let allRows = [];
+      for (const item of rawItems) {
+        const rows = await fetchRowsFromReportDoc(item);
+        reportRowsMap.set(item.id, rows);
+        allRows = allRows.concat(rows);
+      }
+      const items = rawItems.map(item => ({ ...item, __contentSortValue: getReportContentSortValue(item, reportRowsMap.get(item.id) || []) }));
+      items.sort((a, b) => {
+        const av = a.__contentSortValue || 0;
+        const bv = b.__contentSortValue || 0;
+        if (av === bv) return (b.createdAtMillis || b.createdAt?.seconds || 0) - (a.createdAtMillis || a.createdAt?.seconds || 0);
+        return bv > av ? 1 : -1;
+      });
+      setCloudIndex(items);
+      allRows = dedupeRows(allRows.map(r => { const n = normalizeStoredRow(r); const si = getShiftInfoByMonth(n.agent, n.monthKey, n.shift); return { ...n, shift: n.shift || si.shift, shiftSource: n.shiftSource || si.source }; }));
+      allRows.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+      const weeks = {}, months = {}, years = {}, detailByWeek = {};
+      const weekGroups = {}, monthGroups = {}, yearGroups = {};
+      allRows.forEach(row => {
+        if (!row.weekKey || !row.monthKey || !row.yearKey) return;
+        if (!weekGroups[row.weekKey]) weekGroups[row.weekKey] = [];
+        if (!monthGroups[row.monthKey]) monthGroups[row.monthKey] = [];
+        if (!yearGroups[row.yearKey]) yearGroups[row.yearKey] = [];
+        weekGroups[row.weekKey].push(row);
+        monthGroups[row.monthKey].push(row);
+        yearGroups[row.yearKey].push(row);
+      });
+      Object.entries(weekGroups).forEach(([key, rows]) => {
+        const first = rows[0];
+        weeks[key] = buildPeriodSummary(rows, key, first.weekLabel, { year: first.yearKey, month: first.monthKey, weekStart: first.weekStart, weekEnd: first.weekEnd });
+        detailByWeek[key] = { weekKey: key, weekLabel: first.weekLabel, rows: rows.map(r => ({ ...r })) };
+      });
+      Object.entries(monthGroups).forEach(([key, rows]) => { const first = rows[0]; months[key] = buildPeriodSummary(rows, key, key, { year: first.yearKey, month: key }); });
+      Object.entries(yearGroups).forEach(([key, rows]) => { years[key] = buildPeriodSummary(rows, key, key, { year: key }); });
+      const newStore = { rows: allRows, weeks, months, years, detailByWeek };
+      setCloudMasterStore(newStore);
+
+      try {
+        localStorage.removeItem("weekly_call_project_cloud_master_store");
+        localStorage.setItem(
+          "weekly_call_project_cloud_master_summary",
+          JSON.stringify({
+            updatedAt: Date.now(),
+            rowCount: allRows.length,
+            yearCount: Object.keys(years).length,
+            monthCount: Object.keys(months).length,
+            weekCount: Object.keys(weeks).length
+          })
+        );
+      } catch (e) {
+        console.warn("local summary cache skipped", e);
+      }
+      if (autoPreview && items.length > 0) {
+        const latest = items[0];
+        const latestRows = reportRowsMap.get(latest.id) || [];
+        const preview = dedupeRows(latestRows.map(r => { const n = normalizeStoredRow(r); const si = getShiftInfoByMonth(n.agent, n.monthKey, n.shift); return { ...n, shift: n.shift || si.shift, shiftSource: n.shiftSource || si.source }; })).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+        setPreviewRows(preview);
+        setCsvFileName(latest.fileName || "雲端資料");
+        setCsvResult(makeCsvResultFromPreviewRows(preview, latest.rawCount || latestRows.length));
+        setPreviewMeta({
+          mode: "cloud-latest",
+          title: `最新資料檔：${latest.fileName || latest.id}`,
+          weekKeys: Array.from(new Set(preview.map(r => r.weekKey).filter(Boolean))).sort(),
+          monthKeys: Array.from(new Set(preview.map(r => r.monthKey).filter(Boolean))).sort(),
+          yearKeys: Array.from(new Set(preview.map(r => r.yearKey).filter(Boolean))).sort(),
+          sourceCount: 1,
+          recordCountBeforeDedupe: latestRows.length,
+          recordCountAfterDedupe: preview.length
+        });
+        if (preview.length) setUploadMessage(`已自動載入最新資料檔：${latest.fileName || latest.id}，以檔案內容中的最新日期判定，共 ${preview.length} 筆。`);
+      }
+      setSyncStatus(`☁️ 雲端已同步 ✓ ${user.email}`);
+    } catch (e) {
+      console.error(e);
+      setSyncStatus("雲端讀取失敗");
+      setUploadMessage(`雲端讀取失敗：${e.message || e}`);
+    }
+  };
+
   useEffect(() => {
     if (!firebaseReady || !auth) return;
-    const unsubscribe = auth.onAuthStateChanged(async (u) => {
+    const unsub = auth.onAuthStateChanged(async (u) => {
       setUser(u);
       setAuthReady(true);
       if (u) {
-        await loadCloudHistory(u);
+        try {
+          const shiftSnap = await db.collection("weekly_call_project").doc("shift_rules").get();
+          if (shiftSnap.exists) {
+            const rules = shiftSnap.data().rules || EMPTY_SHIFT_RULES;
+            setShiftRules(rules);
+            localStorage.setItem("weekly_call_project_shift_rules", JSON.stringify(rules));
+          }
+          await loadCloudBundle({ autoPreview: true });
+        } catch (e) {
+          console.error(e);
+          setSyncStatus("雲端讀取失敗");
+        }
       } else {
-        setSyncStatus('尚未登入');
+        setSyncStatus("尚未登入");
+        setCloudIndex([]);
+        setCloudMasterStore(EMPTY_CLOUD_STORE);
+        setPreviewRows([]);
+        setPreviewMeta(EMPTY_PREVIEW_META);
       }
     });
-    return () => unsubscribe();
+    return () => unsub();
   }, []);
 
-  const loadCloudHistory = async (currentUser) => {
+  useEffect(() => {
+    const rule = shiftRules[shiftEditorMonth] || { "早班": [], "中班": [], "晚班": [] };
+    setShiftDraft({ "早班": stringifyNameList(rule["早班"]), "中班": stringifyNameList(rule["中班"]), "晚班": stringifyNameList(rule["晚班"]) });
+  }, [shiftEditorMonth, shiftRules]);
+
+  const buildCsvResult = (rawRows) => {
+    const detailRows = [];
+    const handleMap = new Map();
+    const speakMap = new Map();
+    const agentSet = new Set();
+    const accumulateSummary = (map, agent, shift, line, sec) => {
+      if (!map.has(agent)) {
+        map.set(agent, { "客服名稱": agent, "班別": shift, "GT專線": 0, "儲值專線": 0, "GT+儲值專線": 0, "滿貫專線": 0, "金好運專線": 0, "總計": 0 });
+      }
+      const row = map.get(agent);
+      row["班別"] = row["班別"] || shift;
+      if (line === "GT專線") { row["GT專線"] += sec; row["GT+儲值專線"] += sec; }
+      else if (line === "儲值專線") { row["儲值專線"] += sec; row["GT+儲值專線"] += sec; }
+      else if (line === "滿貫專線") row["滿貫專線"] += sec;
+      else if (line === "金好運專線") row["金好運專線"] += sec;
+      row["總計"] += sec;
+    };
+    for (const row of rawRows) {
+      const data = getRowValueByAliases(row);
+      const direction = String(data.direction || "").trim();
+      const agent = String(data.agent || "").trim();
+      if (direction !== "傳入" || !agent) continue;
+      const { date, time } = parseDateTimeValue(data.datetime);
+      const weekInfo = getWeekInfo(date, time || "00:00:00");
+      const monthKey = getCalendarMonthKey(date);
+      const shiftInfo = getShiftInfoByMonth(agent, monthKey);
+      const shift = shiftInfo.shift;
+      const line = normalizeLineName(data.line);
+      const sat = extractSatisfaction(data.tags);
+      const dialogId = String(data.dialogId || "").trim();
+      const handleSec = parseDuration(data.handleTime);
+      const speakSec = parseDuration(data.speakTime);
+      detailRows.push({
+        "客服名稱": agent,
+        "班別": shift,
+        "班別來源": shiftInfo.source,
+        "來電日期": date,
+        "來電時間": time,
+        "遊戲專線": line,
+        "滿意度問題1": sat.q1,
+        "滿意度問題2": sat.q2,
+        "對話ID": dialogId,
+        "總處理秒數": handleSec,
+        "總發話秒數": speakSec
+      });
+      accumulateSummary(handleMap, agent, shift, line, handleSec);
+      accumulateSummary(speakMap, agent, shift, line, speakSec);
+      agentSet.add(agent);
+    }
+    detailRows.sort((a, b) => `${a["來電日期"]} ${a["來電時間"]}`.localeCompare(`${b["來電日期"]} ${b["來電時間"]}`));
+    return { rawCount: rawRows.length, validCount: detailRows.length, agentCount: agentSet.size, detailRows, handleRows: Array.from(handleMap.values()).sort((a, b) => a["客服名稱"].localeCompare(b["客服名稱"], "zh-Hant")), speakRows: Array.from(speakMap.values()).sort((a, b) => a["客服名稱"].localeCompare(b["客服名稱"], "zh-Hant")) };
+  };
+
+  const convertCsvResultToWeeklyRows = (result) => (result.detailRows || []).map(row => {
+    const date = row["來電日期"];
+    const time = row["來電時間"];
+    const weekInfo = getWeekInfo(date, time || "00:00:00");
+    const monthKey = getCalendarMonthKey(date);
+    const handleDuration = Number(row["總處理秒數"] || 0);
+    const speakDuration = Number(row["總發話秒數"] || 0);
+    return {
+      agent: row["客服名稱"],
+      shift: row["班別"] || getShiftByMonth(row["客服名稱"], monthKey),
+      shiftSource: row["班別來源"] || getShiftInfoByMonth(row["客服名稱"], monthKey, row["班別"] || "").source,
+      date, time, monthKey,
+      yearKey: getCalendarYearKey(date),
+      weekKey: weekInfo?.weekKey || "",
+      weekLabel: weekInfo?.weekLabel || "",
+      weekStart: weekInfo?.monday || "",
+      weekEnd: weekInfo?.sunday || "",
+      line: row["遊戲專線"],
+      q1: row["滿意度問題1"],
+      q2: row["滿意度問題2"],
+      id: row["對話ID"],
+      handleDuration,
+      speakDuration,
+      duration: speakDuration
+    };
+  });
+
+  const handleDataUpload = async (file) => {
+    if (!file) return;
     try {
-      setSyncStatus('載入雲端資料中...');
-      const snap = await db.collection('team_data').doc('history').get();
-      if (snap.exists) {
-        const months = snap.data().months || {};
-        setHistoryData(months);
-        localStorage.setItem('cs_sat_history', JSON.stringify(months));
+      const rows = await readSpreadsheetRows(file);
+      const result = buildCsvResult(rows);
+      const weeklyRows = convertCsvResultToWeeklyRows(result);
+      const weekKeys = Array.from(new Set(weeklyRows.map(r => r.weekKey).filter(Boolean))).sort();
+      const monthKeysAll = Array.from(new Set(weeklyRows.map(r => r.monthKey).filter(Boolean))).sort();
+      const yearKeysAll = Array.from(new Set(weeklyRows.map(r => r.yearKey).filter(Boolean))).sort();
+      const weekCounter = {};
+      weeklyRows.forEach(r => { if (r.weekKey) weekCounter[r.weekKey] = (weekCounter[r.weekKey] || 0) + 1; });
+      const sortedWeekKeys = Object.keys(weekCounter).sort((a, b) => (weekCounter[b] - weekCounter[a]) || a.localeCompare(b));
+      const targetWeekKey = sortedWeekKeys[0] || "";
+
+      let keptRowsRaw = [];
+      let keptDetailRows = [];
+      let mode = uploadMode;
+      if (mode === "auto") mode = weekKeys.length <= 1 ? "single_week" : "multi_week";
+
+      if (mode === "single_week") {
+        keptRowsRaw = weeklyRows.filter(r => r.weekKey === targetWeekKey);
+        keptDetailRows = result.detailRows.filter(row => getWeekInfo(row["來電日期"], row["來電時間"] || "00:00:00")?.weekKey === targetWeekKey);
+      } else {
+        keptRowsRaw = weeklyRows;
+        keptDetailRows = result.detailRows;
       }
 
-      const detailSnap = await db.collection('team_data').doc('detail_by_month').get();
-      if (detailSnap.exists) {
-        const detailMonths = detailSnap.data().months || {};
-        setDetailByMonth(detailMonths);
-        localStorage.setItem('cs_sat_detail_by_month', JSON.stringify(detailMonths));
-      }
+      const fileDuplicateCount = getDuplicateCount(keptRowsRaw);
+      const keptRows = dedupeRows(keptRowsRaw).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+      const keptWeekKeys = Array.from(new Set(keptRows.map(r => r.weekKey).filter(Boolean))).sort();
+      const keptMonthKeys = Array.from(new Set(keptRows.map(r => r.monthKey).filter(Boolean))).sort();
+      const keptYearKeys = Array.from(new Set(keptRows.map(r => r.yearKey).filter(Boolean))).sort();
+      const excludedCount = weeklyRows.length - keptRowsRaw.length;
+      const targetWeekLabel = keptRows[0]?.weekLabel || "";
+      const modeTitle = mode === "single_week"
+        ? `本次上傳單週資料：${formatWeekKeyZh(targetWeekKey || "-")}`
+        : `本次上傳整批資料：${keptMonthKeys.join("、") || "多週整合"}`;
+      const message = mode === "single_week"
+        ? `檔案「${file.name}」上傳完成。${uploadMode === "auto" ? "系統自動判斷為單週資料，" : "目前使用單週模式，"}本次採用 ${formatWeekKeyZh(targetWeekKey || "-")}${targetWeekLabel ? `（${targetWeekLabel.replace(/\s*~\s*/g, "～")}）` : ""}，共保留 ${keptRows.length} 筆，排除 ${excludedCount} 筆非當周資料，檔內重複去除 ${fileDuplicateCount} 筆。`
+        : `檔案「${file.name}」上傳完成。${uploadMode === "auto" ? `系統自動判斷為多週/整月資料，偵測到 ${weekKeys.length} 週、${monthKeysAll.length} 個月份，已全部保留。` : `目前使用整批模式，已保留全部 ${weekKeys.length} 週資料。`} 共 ${keptRows.length} 筆，檔內重複去除 ${fileDuplicateCount} 筆。`;
 
-      setSyncStatus(`☁️ 雲端已同步 ✓ ${currentUser.email}`);
+      setCsvFileName(file.name || "");
+      setCsvResult(makeCsvResultFromPreviewRows(keptRows, result.rawCount));
+      setPreviewRows(keptRows);
+      setPreviewMeta({
+        mode,
+        title: modeTitle,
+        weekKeys: keptWeekKeys,
+        monthKeys: keptMonthKeys,
+        yearKeys: keptYearKeys,
+        sourceCount: 1,
+        recordCountBeforeDedupe: keptRowsRaw.length,
+        recordCountAfterDedupe: keptRows.length
+      });
+      setUploadMessage(message);
+      setActiveTab("weekly");
     } catch (e) {
       console.error(e);
-      try {
-        const savedMonths = localStorage.getItem('cs_sat_history');
-        if (savedMonths) setHistoryData(JSON.parse(savedMonths));
-      } catch (err) {}
-      try {
-        const savedDetails = localStorage.getItem('cs_sat_detail_by_month');
-        if (savedDetails) setDetailByMonth(JSON.parse(savedDetails));
-      } catch (err) {}
-      setSyncStatus('雲端讀取失敗，顯示本機資料');
+      alert("檔案讀取失敗，請確認格式是否為 csv / xlsx / xls。");
     }
   };
 
-  const saveHistory = async (newHistory, newDetailByMonth = null) => {
-    setHistoryData(newHistory);
-    localStorage.setItem('cs_sat_history', JSON.stringify(newHistory));
-
-    if (newDetailByMonth) {
-      setDetailByMonth(newDetailByMonth);
-      localStorage.setItem('cs_sat_detail_by_month', JSON.stringify(newDetailByMonth));
-    }
-
-    if (firebaseReady && user && db) {
-      try {
-        setSyncStatus('同步中...');
-        await db.collection('team_data').doc('history').set({ months: newHistory }, { merge: true });
-        if (newDetailByMonth) {
-          await db.collection('team_data').doc('detail_by_month').set({ months: newDetailByMonth }, { merge: true });
-        }
-        setSyncStatus('☁️ 雲端已同步 ✓');
-      } catch (e) {
-        console.error(e);
-        setSyncStatus('同步失敗，已保留本機資料');
-      }
-    }
-  };
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoginError('');
+  const saveCurrentUploadToCloud = async () => {
+    if (!firebaseReady || !user || !db) return alert("目前未登入，無法同步到雲端。");
+    if (!previewRows.length) return alert("目前沒有可同步的資料。");
+    if (!window.confirm("是否要將目前資料同步到雲端？")) return;
+    if (!window.confirm("同步後會先自動檢查重複資料，並保留本次同步紀錄，是否再次確認？")) return;
     try {
-      await auth.signInWithEmailAndPassword(email, password);
-      setPassword('');
-    } catch (err) {
-      setLoginError('登入失敗：帳號或密碼錯誤，或尚未建立使用者');
-    }
-  };
-
-  const handleLogout = async () => {
-    if (!auth) return;
-    await auth.signOut();
-  };
-
-  const clearAllData = async () => {
-    if (!window.confirm('⚠️ 警告：確定要刪除「所有」歷史資料嗎？\n此動作會同時清空雲端與本機資料，且無法復原！')) {
-      return;
-    }
-
-    // 徹底清除所有狀態與記憶
-    setHistoryData({});
-    setDetailByMonth({});
-    setData([]);
-    setMasterSelectedMonth('');
-    setSelectedYears([]);
-    setSelectedMonths([]);
-    setSelectedAgents([]);
-    prevAvailableYears.current = [];
-    prevAvailableMonths.current = [];
-    prevAvailableAgents.current = [];
-    
-    localStorage.removeItem('cs_sat_history');
-    localStorage.removeItem('cs_sat_detail_by_month');
-
-    if (firebaseReady && user && db) {
-      try {
-        setSyncStatus('刪除雲端資料中...');
-        await db.collection('team_data').doc('history').delete();
-        await db.collection('team_data').doc('detail_by_month').delete();
-        setSyncStatus('☁️ 雲端與本機資料已徹底清空');
-      } catch (error) {
-        console.error('刪除雲端資料失敗:', error);
-        setSyncStatus('本機已清空，但雲端刪除失敗');
+      setSyncStatus("同步雲端中...");
+      const snap = await db.collection("weekly_call_project_reports").get();
+      let cloudRows = [];
+      for (const doc of snap.docs) {
+        const rows = await fetchRowsFromReportDoc(doc);
+        cloudRows = cloudRows.concat(rows);
       }
-    } else {
-      setSyncStatus('本機資料已清空');
+      cloudRows = dedupeRows(cloudRows);
+      const cloudKeys = new Set(cloudRows.map(makeRowUniqueKey));
+      const previewUnique = dedupeRows(previewRows);
+      let duplicateWithCloud = 0;
+      const newRows = [];
+      previewUnique.forEach(row => {
+        const key = makeRowUniqueKey(row);
+        if (cloudKeys.has(key)) duplicateWithCloud++;
+        else newRows.push(row);
+      });
+
+      const now = new Date();
+      const docId = `${Date.now()}`;
+      const weekKeys = Array.from(new Set(previewUnique.map(r => r.weekKey).filter(Boolean))).sort();
+      const monthKeys = Array.from(new Set(previewUnique.map(r => r.monthKey).filter(Boolean))).sort();
+      const yearKeys = Array.from(new Set(previewUnique.map(r => r.yearKey).filter(Boolean))).sort();
+      const rowChunks = chunkArray(newRows, 300);
+      const reportRef = db.collection("weekly_call_project_reports").doc(docId);
+
+      await reportRef.set({
+        fileName: csvFileName || "未命名檔案",
+        validCount: previewUnique.length,
+        rawCount: csvResult.rawCount || previewUnique.length,
+        agentCount: Array.from(new Set(previewUnique.map(r => r.agent).filter(Boolean))).length,
+        weekKeys,
+        monthKeys,
+        yearKeys,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        createdAtMillis: Date.now(),
+        createdAtText: now.toISOString(),
+        createdBy: user.email,
+        duplicateCountWithCloud: duplicateWithCloud,
+        insertedCount: newRows.length,
+        skippedAllBecauseDuplicate: newRows.length === 0,
+        previewMeta,
+        rowStorage: rowChunks.length > 1 ? "chunks" : "inline",
+        rowChunkCount: rowChunks.length,
+        rows: rowChunks.length <= 1 ? newRows : []
+      });
+
+      if (rowChunks.length > 1) {
+        for (let i = 0; i < rowChunks.length; i++) {
+          await reportRef.collection("rows_chunks").doc(`chunk_${String(i + 1).padStart(4, "0")}`).set({
+            chunkIndex: i + 1,
+            rows: rowChunks[i]
+          });
+        }
+      }
+
+      await loadCloudBundle({ autoPreview: true });
+      setUploadMessage(`本次預覽 ${previewUnique.length} 筆，與雲端重複 ${duplicateWithCloud} 筆，實際新增 ${newRows.length} 筆。雲端已保留本次同步紀錄。`);
+      setSyncStatus(`☁️ 雲端已同步 ✓ ${user.email}`);
+      alert(`同步完成。實際新增 ${newRows.length} 筆，略過重複 ${duplicateWithCloud} 筆。`);
+    } catch (e) {
+      console.error(e);
+      setSyncStatus("同步雲端失敗");
+      alert(`同步雲端失敗：${e.message || e}`);
     }
   };
 
-  const parseDuration = (val) => {
-    if (val === null || val === undefined || val === '') return 0;
-    if (typeof val === 'number') {
-      if (val < 1) return Math.round(val * 86400);
-      return Math.round(val);
+  const toggleCloudItem = (id) => setSelectedCloudItems(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  const loadSelectedCloudReports = async (mergeMode = false) => {
+    if (!selectedCloudItems.length) return alert("請先勾選雲端資料。");
+    try {
+      const docs = await Promise.all(selectedCloudItems.map(id => db.collection("weekly_call_project_reports").doc(id).get()));
+      let rows = [];
+      let firstDocData = null;
+      for (const doc of docs) {
+        if (doc.exists) {
+          const data = { id: doc.id, ...doc.data() };
+          if (!firstDocData) firstDocData = data;
+          const dataRows = await fetchRowsFromReportDoc(data);
+          rows = rows.concat(dataRows);
+        }
+      }
+      if (!rows.length) return alert("選取的雲端資料沒有內容。");
+      const beforeDedupe = rows.length;
+      rows = dedupeRows(rows).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+      const finalRows = mergeMode ? dedupeRows([...previewRows, ...rows]).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`)) : rows;
+      setPreviewRows(finalRows);
+      if (!mergeMode && firstDocData?.fileName) setCsvFileName(firstDocData.fileName);
+      setCsvResult(makeCsvResultFromPreviewRows(finalRows, firstDocData?.rawCount || beforeDedupe));
+      setPreviewMeta({
+        mode: mergeMode ? "merge-selected-with-preview" : "selected-cloud",
+        title: mergeMode ? "多筆雲端資料已累積到目前預覽" : "已載入選取的雲端資料",
+        weekKeys: Array.from(new Set(finalRows.map(r => r.weekKey).filter(Boolean))).sort(),
+        monthKeys: Array.from(new Set(finalRows.map(r => r.monthKey).filter(Boolean))).sort(),
+        yearKeys: Array.from(new Set(finalRows.map(r => r.yearKey).filter(Boolean))).sort(),
+        sourceCount: selectedCloudItems.length,
+        recordCountBeforeDedupe: mergeMode ? previewRows.length + beforeDedupe : beforeDedupe,
+        recordCountAfterDedupe: finalRows.length
+      });
+      setUploadMessage(mergeMode ? "已載入並累積選取的雲端資料（已去重）。" : "已載入選取的單期雲端資料（已去重）。");
+      setActiveTab("weekly");
+    } catch (e) {
+      console.error(e);
+      alert(`載入雲端資料失敗：${e.message || e}`);
     }
-    const s = String(val).trim();
-    if (/^\d+$/.test(s)) return parseInt(s, 10);
-    const hhmmss = s.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/);
-    if (hhmmss) {
-      const h = parseInt(hhmmss[1] || '0', 10);
-      const m = parseInt(hhmmss[2] || '0', 10);
-      const sec = parseInt(hhmmss[3] || '0', 10);
-      return h * 3600 + m * 60 + sec;
-    }
-    const minMatch = s.match(/(\d+)分/);
-    const secMatch = s.match(/(\d+)秒/);
-    return (minMatch ? parseInt(minMatch[1], 10) : 0) * 60 + (secMatch ? parseInt(secMatch[1], 10) : 0);
   };
 
-  const getSatResult = (label, qNum) => {
-    if (!label) return '未回答';
-    const s = String(label);
-    const regex = new RegExp(`問題${qNum}(非常滿意|尚可|不滿意|非常不滿意)`);
-    const match = s.match(regex);
-    return match ? match[1] : '未回答';
+  const loadMonthFromCloud = (monthKey, mergeMode = false) => {
+    const normalized = normalizeMonthKey(monthKey);
+    if (!normalized) return alert("請先選擇月份。");
+    const rows = (cloudMasterStore.rows || []).filter(r => r.monthKey === normalized);
+    if (!rows.length) return alert(`找不到 ${normalized} 的雲端資料。`);
+    const beforeDedupe = rows.length;
+    const monthRows = dedupeRows(rows).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+    const finalRows = mergeMode ? dedupeRows([...previewRows, ...monthRows]).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`)) : monthRows;
+    setPreviewRows(finalRows);
+    setCsvResult(makeCsvResultFromPreviewRows(finalRows, finalRows.length));
+    setPreviewMeta({
+      mode: mergeMode ? "merge-month-with-preview" : "month-preview",
+      title: mergeMode ? `已將 ${normalized} 整月資料累積到目前預覽` : `${normalized} 整月資料預覽`,
+      weekKeys: Array.from(new Set(finalRows.map(r => r.weekKey).filter(Boolean))).sort(),
+      monthKeys: Array.from(new Set(finalRows.map(r => r.monthKey).filter(Boolean))).sort(),
+      yearKeys: Array.from(new Set(finalRows.map(r => r.yearKey).filter(Boolean))).sort(),
+      sourceCount: Array.from(new Set(monthRows.map(r => r.weekKey).filter(Boolean))).length,
+      recordCountBeforeDedupe: mergeMode ? previewRows.length + beforeDedupe : beforeDedupe,
+      recordCountAfterDedupe: finalRows.length
+    });
+    setUploadMessage(mergeMode ? `已將 ${normalized} 整月資料累積到目前預覽。` : `已載入 ${normalized} 整月資料，共 ${monthRows.length} 筆。`);
+    setActiveTab("weekly");
   };
 
-  const parseExcelDate = (serial) => {
-    const unixMs = Math.round((serial - 25569) * 86400 * 1000);
-    const d = new Date(unixMs);
-    const y = d.getUTCFullYear();
-    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(d.getUTCDate()).padStart(2, '0');
-    const h = String(d.getUTCHours()).padStart(2, '0');
-    const min = String(d.getUTCMinutes()).padStart(2, '0');
-    const s = String(d.getUTCSeconds()).padStart(2, '0');
-    return { date: `${y}-${m}-${day}`, time: `${h}:${min}:${s}` };
+  const loadLatestCloudPreview = async () => {
+    if (!cloudIndex.length) return alert("目前沒有雲端資料可載入。");
+    try {
+      const latest = cloudIndex[0];
+      const latestRows = await fetchRowsFromReportDoc(latest);
+      const preview = dedupeRows(latestRows.map(r => { const n = normalizeStoredRow(r); const si = getShiftInfoByMonth(n.agent, n.monthKey, n.shift); return { ...n, shift: n.shift || si.shift, shiftSource: n.shiftSource || si.source }; })).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+      setPreviewRows(preview);
+      setCsvFileName(latest.fileName || "雲端最新資料");
+      setCsvResult(makeCsvResultFromPreviewRows(preview, latest.rawCount || latestRows.length));
+      setPreviewMeta({
+        mode: "cloud-latest",
+        title: `最新雲端資料：${latest.fileName || latest.id}`,
+        weekKeys: Array.from(new Set(preview.map(r => r.weekKey).filter(Boolean))).sort(),
+        monthKeys: Array.from(new Set(preview.map(r => r.monthKey).filter(Boolean))).sort(),
+        yearKeys: Array.from(new Set(preview.map(r => r.yearKey).filter(Boolean))).sort(),
+        sourceCount: 1,
+        recordCountBeforeDedupe: latestRows.length,
+        recordCountAfterDedupe: preview.length
+      });
+      setUploadMessage(`已切換成最新雲端資料：${latest.fileName || latest.id}（依檔案內容最新日期判定）`);
+      setActiveTab("weekly");
+    } catch (e) {
+      console.error(e);
+      alert(`載入最新雲端資料失敗：${e.message || e}`);
+    }
+  };
+
+  const deleteSelectedCloudReports = async () => {
+    if (!selectedCloudItems.length) return alert("請先勾選要刪除的雲端資料。");
+    if (!window.confirm(`是否要刪除 ${selectedCloudItems.length} 筆雲端資料？`)) return;
+    if (!window.confirm("此動作無法復原，是否再次確認刪除？")) return;
+    try {
+      setSyncStatus("刪除雲端資料中...");
+      for (const id of selectedCloudItems) {
+        await deleteReportWithChunks(id);
+      }
+      setSelectedCloudItems([]);
+      await loadCloudBundle({ autoPreview: true });
+      alert("已刪除勾選的雲端資料。");
+    } catch (e) {
+      console.error(e);
+      setSyncStatus("刪除雲端資料失敗");
+      alert(`刪除雲端資料失敗：${e.message || e}`);
+    }
+  };
+
+  const addShiftMonth = async () => {
+    const normalized = normalizeMonthKey(shiftMonthInput);
+    if (!normalized) return alert("請輸入正確格式，例如 2026-04");
+    if (shiftRules[normalized]) { setShiftEditorMonth(normalized); return alert("此月份已存在，已切換到該月份。"); }
+    const next = { ...shiftRules, [normalized]: { "早班": [], "中班": [], "晚班": [] } };
+    await saveShiftRules(next);
+    setShiftMonthInput("");
+    setShiftEditorMonth(normalized);
+  };
+
+  const saveCurrentShiftMonth = async () => {
+    const target = shiftEditorMonth || "default";
+    const next = { ...shiftRules, [target]: { "早班": parseNameList(shiftDraft["早班"]), "中班": parseNameList(shiftDraft["中班"]), "晚班": parseNameList(shiftDraft["晚班"]) } };
+    await saveShiftRules(next);
+    alert("班表已儲存");
+  };
+
+  const deleteShiftMonth = async (monthKey) => {
+    if (monthKey === "default") return alert("default 不可刪除");
+    if (!window.confirm(`確定刪除 ${monthKey} 的班表設定嗎？`)) return;
+    const next = { ...shiftRules };
+    delete next[monthKey];
+    await saveShiftRules(next);
+    setShiftEditorMonth("default");
   };
 
   const availableAgents = useMemo(() => {
-    const set = new Set(Object.keys(AGENT_TO_SHIFT));
-    data.forEach(d => { if (d.agent) set.add(d.agent); });
-    Object.values(historyData).forEach(h => {
-      if (h && h.agents) {
-        h.agents.forEach(a => set.add(a.name));
-      }
+    const set = new Set(getAllAgentsFromShiftRules());
+    (cloudMasterStore.rows || []).forEach(r => { if (r.agent) set.add(r.agent); });
+    ["weeks", "months", "years"].forEach(type => Object.values(cloudMasterStore[type] || {}).forEach(period => (period.agents || []).forEach(a => set.add(a.name))));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hant"));
+  }, [cloudMasterStore, getAllAgentsFromShiftRules]);
+
+  useEffect(() => { if (!selectedAgent && availableAgents.length) setSelectedAgent(availableAgents[0]); }, [availableAgents, selectedAgent]);
+
+  const allYears = useMemo(() => Object.keys(cloudMasterStore.years || {}).sort(), [cloudMasterStore]);
+  const allMonths = useMemo(() => Object.keys(cloudMasterStore.months || {}).sort(), [cloudMasterStore]);
+  const allWeeks = useMemo(() => Object.keys(cloudMasterStore.weeks || {}).sort(), [cloudMasterStore]);
+  const availableHistoryMonths = useMemo(() => {
+    if (!selectedYears.length) return [];
+    return allMonths.filter(month => selectedYears.includes(month.slice(0, 4)));
+  }, [allMonths, selectedYears]);
+  const availableHistoryWeeks = useMemo(() => {
+    if (!selectedYears.length || !selectedMonths.length) return [];
+    return allWeeks.filter(week => {
+      const item = cloudMasterStore.weeks?.[week];
+      return item && selectedYears.includes(item.year) && selectedMonths.includes(item.month);
     });
-    return Array.from(set).sort((a, b) => {
-      const shiftA = AGENT_TO_SHIFT[a] ? 0 : 1;
-      const shiftB = AGENT_TO_SHIFT[b] ? 0 : 1;
-      if (shiftA !== shiftB) return shiftA - shiftB;
-      return a.localeCompare(b);
-    });
-  }, [data, historyData]);
-
-  const parseRows = (rows) => {
-    const headers = rows[0].map(h => String(h || '').trim());
-    const idxDate = headers.findIndex(h => h.includes('日期'));
-    const idxAgent = headers.indexOf('使用者 - 已互動');
-    const idxQueue = headers.indexOf('第一佇列');
-    const idxTalkTime = headers.indexOf('總發話時間');
-    const idxLabels = headers.indexOf('外部標籤');
-    const idxId = headers.indexOf('對話 ID');
-
-    if (idxAgent === -1) throw new Error("找不到『使用者 - 已互動』欄位，請確認檔案格式是否正確。");
-
-    return rows.slice(1)
-      .filter(row => {
-        const name = String(row[idxAgent] || '').trim();
-        return name !== '';
-      })
-      .map(row => {
-        const name = String(row[idxAgent]).trim();
-        let rawDateVal = row[idxDate];
-        let date = '';
-        let time = '';
-
-        if (typeof rawDateVal === 'number') {
-            const dt = parseExcelDate(rawDateVal);
-            date = dt.date;
-            time = dt.time;
-        } else {
-            let rawDateStr = String(rawDateVal || '').replace(/["']/g, '').trim();
-            if (rawDateStr.includes(' ')) {
-                const parts = rawDateStr.split(/\s+/);
-                date = parts[0];
-                time = parts[1] || '';
-            } else {
-                date = rawDateStr;
-            }
-            date = date.replace(/\//g, '-');
-        }
-
-        return {
-          agent: name,
-          shift: AGENT_TO_SHIFT[name] || '',
-          date: date,
-          time: time,
-          line: String(row[idxQueue] || '').replace(/["']/g, '').trim(),
-          q1: getSatResult(row[idxLabels], 1),
-          q2: getSatResult(row[idxLabels], 2),
-          id: String(row[idxId] || '').replace(/["']/g, '').trim(),
-          duration: parseDuration(row[idxTalkTime])
-        };
-      });
-  };
-
-  const importHistoryJson = (jsonText) => {
-    const parsed = JSON.parse(jsonText);
-    const merged = { ...historyData, ...parsed };
-    saveHistory(merged);
-  };
-
-  const handleFilesUpload = useCallback(async (files) => {
-    if (!files || files.length === 0) return;
-    setLoading(true);
-    try {
-      let allData = [];
-      let importedHistory = false;
-
-      for (const file of files) {
-        const name = file.name.toLowerCase();
-
-        if (name.endsWith('.json')) {
-          const text = await file.text();
-          importHistoryJson(text);
-          importedHistory = true;
-          continue;
-        }
-
-        const rows = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            try {
-              const data = new Uint8Array(e.target.result);
-              const wb = XLSX.read(data, { type: 'array' });
-              const sheetRows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
-              resolve(sheetRows);
-            } catch (err) {
-              reject(err);
-            }
-          };
-          reader.readAsArrayBuffer(file);
-        });
-
-        if (rows && rows.length > 0) {
-            allData = allData.concat(parseRows(rows));
-        }
-      }
-
-      if (allData.length > 0) {
-        setData(allData);
-        setActiveTab('analysis');
-      } else if (importedHistory) {
-        setActiveTab('history');
-      }
-    } catch (err) {
-      alert('檔案讀取失敗：' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [historyData]);
-
-  const results = useMemo(() => {
-    if (data.length === 0) return null;
-
-    const agentStats = {};
-    availableAgents.forEach(name => {
-      agentStats[name] = {
-        name,
-        shift: AGENT_TO_SHIFT[name] || '',
-        totalCalls: 0,
-        q1VerySatisfied: 0,
-        q1Okay: 0,
-        q1VeryDissatisfied: 0,
-        q1Answered: 0,
-        q1Satisfied: 0,
-        q2VerySatisfied: 0,
-        q2Okay: 0,
-        q2VeryDissatisfied: 0,
-        q2Answered: 0,
-        q2Satisfied: 0,
-        lines: { 'GT': 0, '儲值專線': 0, 'GT+儲值專線': 0, '滿貫專線': 0, '金好運專線': 0 }
-      };
-    });
-
-    data.forEach(d => {
-      const a = agentStats[d.agent];
-      if (!a) return;
-      a.totalCalls++;
-
-      const valid = ['非常滿意', '尚可', '不滿意', '非常不滿意'];
-      const satisfied = ['非常滿意', '尚可'];
-
-      if (d.q1 === '非常滿意') a.q1VerySatisfied++;
-      if (d.q1 === '尚可') a.q1Okay++;
-      if (d.q1 === '非常不滿意') a.q1VeryDissatisfied++;
-      if (d.q2 === '非常滿意') a.q2VerySatisfied++;
-      if (d.q2 === '尚可') a.q2Okay++;
-      if (d.q2 === '非常不滿意') a.q2VeryDissatisfied++;
-
-      if (valid.includes(d.q1)) {
-        a.q1Answered++;
-        if (satisfied.includes(d.q1)) a.q1Satisfied++;
-      }
-      if (valid.includes(d.q2)) {
-        a.q2Answered++;
-        if (satisfied.includes(d.q2)) a.q2Satisfied++;
-      }
-
-      if (d.line.includes('GT')) {
-        a.lines['GT'] += d.duration;
-        a.lines['GT+儲值專線'] += d.duration;
-      }
-      if (d.line.includes('儲值')) {
-        a.lines['儲值專線'] += d.duration;
-        a.lines['GT+儲值專線'] += d.duration;
-      }
-      if (d.line.includes('滿貫')) a.lines['滿貫專線'] += d.duration;
-      if (d.line.includes('金好運')) a.lines['金好運專線'] += d.duration;
-    });
-
-    const analysisList = Object.values(agentStats).map(a => {
-      const q1SatRate = a.q1Answered > 0 ? (a.q1Satisfied / a.q1Answered) * 100 : 0;
-      const q1SurRate = a.totalCalls > 0 ? (a.q1Answered / a.totalCalls) * 100 : 0;
-      const q2SatRate = a.q2Answered > 0 ? (a.q2Satisfied / a.q2Answered) * 100 : 0;
-      const q2SurRate = a.totalCalls > 0 ? (a.q2Answered / a.totalCalls) * 100 : 0;
-      return {
-        ...a,
-        q1SatRate,
-        q1SurRate,
-        q2SatRate,
-        q2SurRate,
-        overallSatAvg: (q1SatRate + q2SatRate) / 2,
-        overallSurAvg: (q1SurRate + q2SurRate) / 2
-      };
-    });
-
-    const lineTotals = { 'GT': 0, '儲值專線': 0, 'GT+儲值專線': 0, '滿貫專線': 0, '金好運專線': 0 };
-    analysisList.forEach(a => {
-      Object.keys(lineTotals).forEach(key => { lineTotals[key] += a.lines[key]; });
-    });
-
-    return { analysisList, lineTotals };
-  }, [data, availableAgents]);
+  }, [allWeeks, cloudMasterStore, selectedYears, selectedMonths]);
+  const shiftMonthKeys = useMemo(() => ["default", ...Object.keys(shiftRules).filter(k => k !== "default").sort()], [shiftRules]);
+  useEffect(() => {
+    if (!selectedYears.length && allYears.length) setSelectedYears([...allYears]);
+  }, [JSON.stringify(allYears), selectedYears.length]);
 
   useEffect(() => {
-    if (!data.length || !results) return;
+    if (!availableHistoryMonths.length) {
+      if (selectedMonths.length) setSelectedMonths([]);
+      return;
+    }
+    setSelectedMonths(prev => {
+      const filtered = prev.filter(month => availableHistoryMonths.includes(month));
+      return filtered.length ? filtered : [...availableHistoryMonths];
+    });
+  }, [JSON.stringify(availableHistoryMonths)]);
 
-    const monthCounts = {};
-    for (const d of data) {
-      if (d.date) {
-        const dateStr = String(d.date).replace(/["']/g, '').trim();
-        let match = dateStr.match(/(20\d{2})[-\/](\d{1,2})/);
-        if (!match) match = dateStr.match(/^(20\d{2})(\d{2})/);
-        if (match) {
-          const mStr = `${match[1]}-${String(match[2]).padStart(2, '0')}`;
-          monthCounts[mStr] = (monthCounts[mStr] || 0) + 1;
-        }
+  useEffect(() => {
+    if (!availableHistoryWeeks.length) {
+      if (selectedWeeks.length) setSelectedWeeks([]);
+      return;
+    }
+    setSelectedWeeks(prev => {
+      const filtered = prev.filter(week => availableHistoryWeeks.includes(week));
+      return filtered.length ? filtered : [...availableHistoryWeeks];
+    });
+  }, [JSON.stringify(availableHistoryWeeks)]);
+  useEffect(() => { if (!selectedDetailWeek && allWeeks.length) setSelectedDetailWeek(allWeeks[allWeeks.length - 1]); }, [JSON.stringify(allWeeks), selectedDetailWeek]);
+  useEffect(() => { if (!selectedDetailMonth && allMonths.length) setSelectedDetailMonth(allMonths[allMonths.length - 1]); }, [JSON.stringify(allMonths), selectedDetailMonth]);
+  useEffect(() => { if (!selectedDetailYear && allYears.length) setSelectedDetailYear(allYears[allYears.length - 1]); }, [JSON.stringify(allYears), selectedDetailYear]);
+  useEffect(() => { if (!cloudLoadMonth && allMonths.length) setCloudLoadMonth(allMonths[allMonths.length - 1]); }, [JSON.stringify(allMonths), cloudLoadMonth]);
+  useEffect(() => { if (!weeklyExportWeek && allWeeks.length) setWeeklyExportWeek(allWeeks[allWeeks.length - 1]); }, [JSON.stringify(allWeeks), weeklyExportWeek]);
+  useEffect(() => { if (!weeklyExportMonth && allMonths.length) setWeeklyExportMonth(allMonths[allMonths.length - 1]); }, [JSON.stringify(allMonths), weeklyExportMonth]);
+  useEffect(() => { if (!weeklyExportYear && allYears.length) setWeeklyExportYear(allYears[allYears.length - 1]); }, [JSON.stringify(allYears), weeklyExportYear]);
+  useEffect(() => {
+    if (selectedAgent && trendCompareMode === "single") setSelectedTrendAgents([selectedAgent]);
+  }, [selectedAgent, trendCompareMode]);
+  useEffect(() => {
+    if (!selectedTrendAgents.length && availableAgents.length) setSelectedTrendAgents([availableAgents[0]]);
+  }, [JSON.stringify(availableAgents)]);
+
+  const periodList = useMemo(() => {
+    const raw = cloudMasterStore[viewType] || {};
+    return Object.keys(raw).sort().filter(key => {
+      if (viewType === "years") return selectedYears.includes(key);
+      if (viewType === "months") return selectedMonths.includes(key) && selectedYears.includes(key.slice(0, 4));
+      if (viewType === "weeks") {
+        const item = raw[key];
+        return selectedWeeks.includes(key) && selectedYears.includes(item.year) && selectedMonths.includes(item.month);
+      }
+      return true;
+    }).map(key => raw[key]);
+  }, [cloudMasterStore, viewType, selectedYears, selectedMonths, selectedWeeks]);
+
+  const getAgentTotalAcrossPeriods = useCallback((agentName, periods) => {
+    return (periods || []).reduce((sum, p) => {
+      const agentData = (p.agents || []).find(a => a.name === agentName);
+      if (!agentData) return sum;
+      return sum + Number(agentData.totalCalls || 0) + Number(agentData.lines?.["GT+儲值專線"] || 0) + Number(agentData.lines?.["滿貫專線"] || 0) + Number(agentData.lines?.["金好運專線"] || 0);
+    }, 0);
+  }, []);
+
+  useEffect(() => {
+    if (!periodList.length || !availableAgents.length) return;
+    if (!selectedAgent || getAgentTotalAcrossPeriods(selectedAgent, periodList) <= 0) {
+      const fallback = availableAgents.find(agent => getAgentTotalAcrossPeriods(agent, periodList) > 0) || availableAgents[0];
+      if (fallback && fallback !== selectedAgent) setSelectedAgent(fallback);
+    }
+  }, [JSON.stringify(periodList.map(p => p.periodKey)), JSON.stringify(availableAgents), selectedAgent, getAgentTotalAcrossPeriods]);
+
+  useEffect(() => {
+    if (trendCompareMode !== "multi") return;
+    const validAgents = selectedTrendAgents.filter(agent => getAgentTotalAcrossPeriods(agent, periodList) > 0);
+    if (validAgents.length !== selectedTrendAgents.length) {
+      if (validAgents.length) setSelectedTrendAgents(validAgents);
+      else {
+        const fallback = availableAgents.filter(agent => getAgentTotalAcrossPeriods(agent, periodList) > 0).slice(0, 3);
+        if (fallback.length) setSelectedTrendAgents(fallback);
       }
     }
+  }, [trendCompareMode, JSON.stringify(periodList.map(p => p.periodKey)), JSON.stringify(selectedTrendAgents), JSON.stringify(availableAgents), getAgentTotalAcrossPeriods]);
 
-    let month = '未知';
-    let maxCount = 0;
-    for (const [m, count] of Object.entries(monthCounts)) {
-        if (count > maxCount) {
-            maxCount = count;
-            month = m;
-        }
-    }
-
-    if (month === '未知') return;
-
-    let sumSat = 0;
-    let sumSur = 0;
-    let countSat = 0;
-    let countSur = 0;
-    let teamTotalCalls = 0;
-
-    results.analysisList.forEach(a => {
-      teamTotalCalls += a.totalCalls;
-      if (a.q1Answered > 0 || a.q2Answered > 0) {
-        sumSat += a.overallSatAvg;
-        countSat++;
-      }
-      if (a.totalCalls > 0) {
-        sumSur += a.overallSurAvg;
-        countSur++;
-      }
-    });
-
-    const monthSummary = {
-      month,
-      year: month.split('-')[0],
-      monthOnly: month.split('-')[1],
-      overallSatAvg: countSat ? sumSat / countSat : 0,
-      overallSurAvg: countSur ? sumSur / countSur : 0,
-      teamTotalCalls,
-      teamLineTime: { ...results.lineTotals },
-      agents: results.analysisList.map(a => ({
-        name: a.name,
-        shift: a.shift,
-        totalCalls: a.totalCalls,
-        q1SatRate: a.q1SatRate,
-        q1SurRate: a.q1SurRate,
-        q2SatRate: a.q2SatRate,
-        q2SurRate: a.q2SurRate,
-        overallSatAvg: a.overallSatAvg,
-        overallSurAvg: a.overallSurAvg,
-        lines: { ...a.lines }
-      }))
-    };
-
-    const detailMonthPayload = {
-      month,
-      updatedAt: new Date().toISOString(),
-      updatedBy: user?.email || 'local',
-      rows: data.map(d => ({
-        agent: d.agent,
-        shift: d.shift,
-        date: d.date,
-        time: d.time,
-        line: d.line,
-        q1: d.q1,
-        q2: d.q2,
-        id: d.id,
-        duration: d.duration
-      }))
-    };
-
-    const mergedHistory = { ...historyData, [month]: monthSummary };
-    const mergedDetailByMonth = { ...detailByMonth, [month]: detailMonthPayload };
-    saveHistory(mergedHistory, mergedDetailByMonth);
-  }, [data, results, user, detailByMonth, historyData]);
-
-  const detailMonths = Object.keys(detailByMonth).sort();
-
-  const historyMonths = Object.keys(historyData).sort();
-  const availableYears = [...new Set(historyMonths.map(m => m.split('-')[0]))].sort();
-  const availableMonthNumbers = [...new Set(historyMonths.map(m => m.split('-')[1]))].sort();
-
-  // --- 自動勾選新加入的選項，解決沒打勾圖表亂跑的視覺錯亂 ---
-  useEffect(() => {
-      const newYears = availableYears.filter(y => !prevAvailableYears.current.includes(y));
-      if (newYears.length > 0) {
-          setSelectedYears(prev => [...prev, ...newYears]);
-          prevAvailableYears.current = availableYears;
-      }
-  }, [availableYears]);
-
-  useEffect(() => {
-      const newMonths = availableMonthNumbers.filter(m => !prevAvailableMonths.current.includes(m));
-      if (newMonths.length > 0) {
-          setSelectedMonths(prev => [...prev, ...newMonths]);
-          prevAvailableMonths.current = availableMonthNumbers;
-      }
-  }, [availableMonthNumbers]);
-
-  useEffect(() => {
-      const newAgents = availableAgents.filter(a => !prevAvailableAgents.current.includes(a));
-      if (newAgents.length > 0) {
-          setSelectedAgents(prev => [...prev, ...newAgents]);
-          prevAvailableAgents.current = availableAgents;
-      }
-  }, [availableAgents]);
-
-  useEffect(() => {
-    if (!singleTrendAgent && availableAgents.length > 0) setSingleTrendAgent(availableAgents[0]);
-    if (!yearCompareAgent && availableAgents.length > 0) setYearCompareAgent(availableAgents[0]);
-  }, [availableAgents]);
-
-  useEffect(() => {
-    if (!compareYearA && availableYears.length > 0) setCompareYearA(availableYears[0]);
-    if (!compareYearB && availableYears.length > 1) setCompareYearB(availableYears[availableYears.length - 1]);
-    if (!compareYearB && availableYears.length === 1) setCompareYearB(availableYears[0]);
-  }, [availableYears.join('|')]);
-
-
-  // --- 明細表防脫鉤邏輯 ---
-  const currentMasterRows = useMemo(() => {
-    // 如果下拉選單空著，智慧判斷要顯示什麼
-    if (!masterSelectedMonth) {
-       // 如果雲端有歷史資料，就預設抓最新的一個月
-       if (detailMonths.length > 0) {
-           return detailByMonth[detailMonths[detailMonths.length - 1]]?.rows || [];
-       }
-       // 否則顯示剛匯入的資料
-       return data;
-    }
-    // 嚴格對應下拉選單的選擇
-    return (detailByMonth[masterSelectedMonth]?.rows || []);
-  }, [masterSelectedMonth, detailByMonth, data, detailMonths]);
-
-  const cumulativeMasterRows = useMemo(() => {
-    return detailMonths
-      .sort()
-      .flatMap(month => (detailByMonth[month]?.rows || []).map(row => ({ ...row, sourceMonth: month })));
-  }, [detailByMonth, detailMonths.join('|')]);
-
-  const displayedMasterRows = masterViewMode === 'current' ? currentMasterRows : cumulativeMasterRows;
-
-  // --- 嚴格篩選邏輯：沒勾 = 沒畫面 ---
-  const filteredHistoryMonths = historyMonths.filter(m => {
-    const [year, month] = m.split('-');
-    return selectedYears.includes(year) && selectedMonths.includes(month);
-  });
-
-  const filteredAgents = selectedAgents;
   const selectedMetricConfig = HISTORY_METRICS.find(m => m.key === selectedMetric) || HISTORY_METRICS[0];
-
-  const formatMetricValue = (value) => {
-    if (value === null || value === undefined) return '-';
-    if (selectedMetricConfig.format === 'percent') return `${Number(value).toFixed(2)}%`;
-    if (selectedMetricConfig.format === 'hours') return (Number(value) / 3600).toFixed(2);
-    return Number(value).toFixed(0);
+  const getMetricValue = (item, agentName) => {
+    if (!item) return null;
+    const agentData = (item.agents || []).find(a => a.name === agentName);
+    if (!agentData) return null;
+    return selectedMetricConfig.source === "lines" ? (agentData.lines?.[selectedMetricConfig.key] || 0) : (agentData[selectedMetricConfig.key] ?? 0);
   };
-
-  const getComparableChartValue = (value) => {
-    if (value === null || value === undefined) return null;
-    if (selectedMetricConfig.format === 'hours') return Number(value) / 3600;
-    return Number(value);
+  const getComparableValue = (value) => value == null ? null : selectedMetricConfig.format === "hours" ? Number(value) / 3600 : Number(value);
+  const formatMetricValue = (value) => value == null ? "-" : selectedMetricConfig.format === "percent" ? `${Number(value).toFixed(2)}%` : selectedMetricConfig.format === "hours" ? `${(Number(value) / 3600).toFixed(2)} 小時` : Number(value).toFixed(0);
+  const formatPeriodKeyForDisplay = (item) => {
+    if (!item) return "";
+    if (viewType === "weeks") return formatWeekKeyZh(item.periodKey);
+    if (viewType === "months") return formatMonthDisplay(item.periodKey);
+    return formatYearDisplay(item.periodKey);
   };
+  const trendAgents = useMemo(() => {
+    if (trendCompareMode === "multi") return selectedTrendAgents.filter(Boolean);
+    return selectedAgent ? [selectedAgent] : [];
+  }, [trendCompareMode, selectedTrendAgents, selectedAgent]);
 
-  const toggleMultiSelect = (value, selected, setter) => {
-    if (selected.includes(value)) setter(selected.filter(x => x !== value));
-    else setter([...selected, value]);
-  };
-
-  const comparisonTable = filteredAgents.map(agentName => {
-    const row = { name: agentName, shift: AGENT_TO_SHIFT[agentName] || '' };
-
-    filteredHistoryMonths.forEach(month => {
-      const monthData = historyData[month];
-      const agentData = monthData?.agents?.find(a => a.name === agentName);
-      if (!agentData) {
-        row[month] = null;
-      } else {
-        row[month] = selectedMetricConfig.source === 'lines'
-          ? (agentData.lines?.[selectedMetricConfig.key] || 0)
-          : (agentData[selectedMetricConfig.key] ?? 0);
-      }
-    });
-
-    const values = filteredHistoryMonths.map(month => row[month]).filter(v => v !== null && v !== undefined);
-    row.avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
-    row.sum = values.length ? values.reduce((a, b) => a + b, 0) : 0;
-    return row;
-  });
-
-  const singleTrendData = useMemo(() => {
-    if (!singleTrendAgent || filteredHistoryMonths.length === 0) return null;
+  const trendData = useMemo(() => {
+    if (!trendAgents.length || !periodList.length) return null;
+    const datasets = trendAgents.map((agent, idx) => ({
+      label: `${agent}｜${selectedMetricConfig.label}`,
+      data: periodList.map(p => getComparableValue(getMetricValue(p, agent))),
+      borderColor: TREND_COLORS[idx % TREND_COLORS.length].border,
+      backgroundColor: TREND_COLORS[idx % TREND_COLORS.length].bg,
+      tension: 0.25
+    })).filter(ds => ds.data.some(v => v != null && !Number.isNaN(v)));
+    if (!datasets.length) return null;
     return {
-      labels: filteredHistoryMonths,
-      datasets: [{
-        label: `${singleTrendAgent}｜${selectedMetricConfig.label}`,
-        data: filteredHistoryMonths.map(month => {
-          const monthData = historyData[month];
-          const agentData = monthData?.agents?.find(a => a.name === singleTrendAgent);
-          if (!agentData) return null;
-          return selectedMetricConfig.source === 'lines'
-            ? getComparableChartValue(agentData.lines?.[selectedMetricConfig.key] || 0)
-            : getComparableChartValue(agentData[selectedMetricConfig.key] ?? 0);
-        }),
-        borderColor: '#2563eb',
-        backgroundColor: 'rgba(37,99,235,0.55)',
-        tension: 0.25,
-        fill: filteredHistoryMonths.length > 1,
-        spanGaps: true,
-        borderWidth: 2
-      }]
+      labels: periodList.map(p => formatPeriodKeyForDisplay(p)),
+      datasets
     };
-  }, [singleTrendAgent, filteredHistoryMonths, historyData, selectedMetric]);
+  }, [JSON.stringify(trendAgents), periodList, selectedMetric]);
 
-  const multiCompareChartData = useMemo(() => {
-    if (filteredHistoryMonths.length === 0 || filteredAgents.length === 0) return null;
-    return {
-      labels: filteredHistoryMonths,
-      datasets: filteredAgents.map((agentName, idx) => ({
-        label: agentName,
-        data: filteredHistoryMonths.map(month => {
-          const monthData = historyData[month];
-          const agentData = monthData?.agents?.find(a => a.name === agentName);
-          if (!agentData) return null;
-          return selectedMetricConfig.source === 'lines'
-            ? getComparableChartValue(agentData.lines?.[selectedMetricConfig.key] || 0)
-            : getComparableChartValue(agentData[selectedMetricConfig.key] ?? 0);
-        }),
-        borderColor: CHART_COLORS[idx % CHART_COLORS.length],
-        backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] + 'CC',
-        tension: 0.25,
-        fill: false,
-        spanGaps: true,
-        borderWidth: 2
-      }))
-    };
-  }, [filteredHistoryMonths, filteredAgents, historyData, selectedMetric]);
-
-  const buildYearAgentMetricMap = (agentName, year) => {
-    const months = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
-    return months.map(monthNo => {
-      const monthKey = `${year}-${monthNo}`;
-      const monthData = historyData[monthKey];
-      const agentData = monthData?.agents?.find(a => a.name === agentName);
-      if (!agentData) return { month: monthNo, value: null };
-      const value = selectedMetricConfig.source === 'lines'
-        ? (agentData.lines?.[selectedMetricConfig.key] || 0)
-        : (agentData[selectedMetricConfig.key] ?? 0);
-      return { month: monthNo, value: getComparableChartValue(value) };
+  const summaryRows = useMemo(() => {
+    const targetAgents = trendCompareMode === "multi" ? selectedTrendAgents.filter(Boolean) : availableAgents;
+    return targetAgents.map(name => {
+      const row = { name, shift: "" };
+      periodList.forEach(p => { row[p.periodKey] = getMetricValue(p, name); if (!row.shift) row.shift = (p.agents || []).find(a => a.name === name)?.shift || row.shift; });
+      return row;
     });
+  }, [availableAgents, periodList, selectedMetric, trendCompareMode, JSON.stringify(selectedTrendAgents)]);
+
+  const detailRows = useMemo(() => {
+    let rows = [];
+    if (selectedDetailMode === "weeks") rows = cloudMasterStore.detailByWeek?.[selectedDetailWeek]?.rows || [];
+    else if (selectedDetailMode === "months") rows = (cloudMasterStore.rows || []).filter(r => r.monthKey === selectedDetailMonth);
+    else rows = (cloudMasterStore.rows || []).filter(r => r.yearKey === selectedDetailYear);
+    return rows.slice().sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+  }, [cloudMasterStore, selectedDetailMode, selectedDetailWeek, selectedDetailMonth, selectedDetailYear]);
+  const detailTitle = useMemo(() => {
+    if (selectedDetailMode === "weeks") return selectedDetailWeek ? formatWeekDisplay(selectedDetailWeek, cloudMasterStore.weeks?.[selectedDetailWeek]?.periodLabel || "") : "尚未選擇週次";
+    if (selectedDetailMode === "months") return selectedDetailMonth ? formatMonthDisplay(selectedDetailMonth) : "尚未選擇月份";
+    return selectedDetailYear ? formatYearDisplay(selectedDetailYear) : "尚未選擇年份";
+  }, [selectedDetailMode, selectedDetailWeek, selectedDetailMonth, selectedDetailYear, cloudMasterStore]);
+  const previewSummary = useMemo(() => summarizePreviewRows(previewRows), [previewRows]);
+  const weeklyExportRows = useMemo(() => {
+    if (weeklyExportMode === "weeks") return cloudMasterStore.detailByWeek?.[weeklyExportWeek]?.rows || [];
+    if (weeklyExportMode === "months") return (cloudMasterStore.rows || []).filter(r => r.monthKey === weeklyExportMonth);
+    if (weeklyExportMode === "years") return (cloudMasterStore.rows || []).filter(r => r.yearKey === weeklyExportYear);
+    return previewRows;
+  }, [weeklyExportMode, weeklyExportWeek, weeklyExportMonth, weeklyExportYear, cloudMasterStore, previewRows]);
+  const weeklyExportSummary = useMemo(() => summarizePreviewRows(weeklyExportRows), [weeklyExportRows]);
+  const weeklyExportLabel = useMemo(() => {
+    if (weeklyExportMode === "weeks") return weeklyExportWeek ? formatWeekDisplay(weeklyExportWeek, cloudMasterStore.weeks?.[weeklyExportWeek]?.periodLabel || "") : "未選擇週次";
+    if (weeklyExportMode === "months") return weeklyExportMonth ? formatMonthDisplay(weeklyExportMonth) : "未選擇月份";
+    if (weeklyExportMode === "years") return weeklyExportYear ? formatYearDisplay(weeklyExportYear) : "未選擇年份";
+    return previewMeta.title || "目前預覽資料";
+  }, [weeklyExportMode, weeklyExportWeek, weeklyExportMonth, weeklyExportYear, cloudMasterStore, previewMeta]);
+
+  const handleDragOver = (e) => { e.preventDefault(); e.stopPropagation(); };
+  const handleDragEnter = (e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
+  const handleDragLeave = (e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); };
+  const handleDrop = (e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); const files = e.dataTransfer.files; if (files && files.length > 0) handleDataUpload(files[0]); };
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoginError("");
+    if (!firebaseReady || !auth) return setLoginError("Firebase 尚未初始化");
+    try { await auth.signInWithEmailAndPassword(email, password); }
+    catch (error) { setLoginError("登入失敗，請檢查帳號密碼。"); console.error(error); }
   };
 
-  const yearlySelfCompare = useMemo(() => {
-    if (!yearCompareAgent || !compareYearA || !compareYearB) return null;
-
-    const yearAData = buildYearAgentMetricMap(yearCompareAgent, compareYearA);
-    const yearBData = buildYearAgentMetricMap(yearCompareAgent, compareYearB);
-    const valA = yearAData.map(x => x.value).filter(v => v !== null && v !== undefined);
-    const valB = yearBData.map(x => x.value).filter(v => v !== null && v !== undefined);
-    const isAvgMetric = selectedMetricConfig.format === 'percent';
-    const summaryA = valA.length ? (isAvgMetric ? valA.reduce((a,b)=>a+b,0)/valA.length : valA.reduce((a,b)=>a+b,0)) : 0;
-    const summaryB = valB.length ? (isAvgMetric ? valB.reduce((a,b)=>a+b,0)/valB.length : valB.reduce((a,b)=>a+b,0)) : 0;
-    const diff = summaryB - summaryA;
-    const monthlyLabels = yearAData.map(x => `${x.month}月`);
-
-    const cumulativeValues = (arr) => {
-      let total = 0;
-      let count = 0;
-      return arr.map(item => {
-        if (item.value !== null && item.value !== undefined) {
-          total += item.value;
-          count += 1;
-        }
-        return count === 0 ? null : (isAvgMetric ? total / count : total);
-      });
-    };
-
-    return {
-      summaryA,
-      summaryB,
-      diff,
-      monthlyChart: {
-        labels: monthlyLabels,
-        datasets: [
-          { label: compareYearA, data: yearAData.map(x => x.value), borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.35)', tension: 0.25, fill: false, spanGaps: true, borderWidth: 2 },
-          { label: compareYearB, data: yearBData.map(x => x.value), borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,0.35)', tension: 0.25, fill: false, spanGaps: true, borderWidth: 2 }
-        ]
-      },
-      cumulativeChart: {
-        labels: monthlyLabels,
-        datasets: [
-          { label: `${compareYearA}累積`, data: cumulativeValues(yearAData), borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.2)', tension: 0.25, fill: false, spanGaps: true, borderWidth: 2 },
-          { label: `${compareYearB}累積`, data: cumulativeValues(yearBData), borderColor: '#16a34a', backgroundColor: 'rgba(22,163,74,0.2)', tension: 0.25, fill: false, spanGaps: true, borderWidth: 2 }
-        ]
-      },
-      annualBar: {
-        labels: [compareYearA, compareYearB],
-        datasets: [{
-          label: selectedMetricConfig.label,
-          data: [summaryA, summaryB],
-          backgroundColor: ['rgba(37,99,235,0.8)', 'rgba(22,163,74,0.8)'],
-          borderColor: ['#2563eb', '#16a34a'],
-          borderWidth: 2
-        }]
-      },
-      monthlyTable: yearAData.map((row, idx) => ({
-        month: row.month,
-        yearA: row.value,
-        yearB: yearBData[idx]?.value ?? null,
-        diff: (yearBData[idx]?.value ?? 0) - (row.value ?? 0),
-        hasData: row.value !== null || yearBData[idx]?.value !== null
-      })).filter(r => r.hasData)
-    };
-  }, [yearCompareAgent, compareYearA, compareYearB, historyData, selectedMetric]);
-
-  const formatCompareDisplay = (value) => {
-    if (value === null || value === undefined) return '-';
-    if (selectedMetricConfig.format === 'percent') return `${Number(value).toFixed(2)}%`;
-    if (selectedMetricConfig.format === 'hours') return `${Number(value).toFixed(2)} 小時`;
-    return Number(value).toFixed(0);
-  };
-
-  const formatCompareDiff = (value) => {
-    if (value === null || value === undefined) return '-';
-    const sign = value > 0 ? '+' : '';
-    if (selectedMetricConfig.format === 'percent') return `${sign}${Number(value).toFixed(2)}%`;
-    if (selectedMetricConfig.format === 'hours') return `${sign}${Number(value).toFixed(2)} 小時`;
-    return `${sign}${Number(value).toFixed(0)}`;
-  };
-
-  const getEvenRowClass = (rowIndex) => ((rowIndex + 1) % 2 === 0 ? 'bg-sky-50' : '');
-
-  const styleHeaderRow = (ws, totalCols, rowIndex = 0, fillColor = '1F4E78', fontColor = 'FFFFFF') => {
-    for (let c = 0; c < totalCols; c++) {
-      const ref = XLSX.utils.encode_cell({ r: rowIndex, c });
-      if (!ws[ref]) continue;
-      ws[ref].s = {
-        font: { bold: true, color: { rgb: fontColor } },
-        fill: { patternType: 'solid', fgColor: { rgb: fillColor }, bgColor: { rgb: fillColor } },
-        alignment: { horizontal: 'center', vertical: 'center' },
-        border: createBorder()
-      };
-    }
-  };
-
-  const applyBorders = (ws) => {
-    const range = XLSX.utils.decode_range(ws['!ref']);
-    for (let r = range.s.r; r <= range.e.r; r++) {
-      for (let c = range.s.c; c <= range.e.c; c++) {
-        const ref = XLSX.utils.encode_cell({ r, c });
-        if (!ws[ref]) continue;
-        ensureCellStyle(ws[ref]).border = createBorder();
-      }
-    }
-  };
-
-  const colorEvenRows = (ws, headerRows = 1) => {
-    const range = XLSX.utils.decode_range(ws['!ref']);
-    for (let r = headerRows; r <= range.e.r; r++) {
-      for (let c = 0; c <= range.e.c; c++) {
-        const ref = XLSX.utils.encode_cell({ r, c });
-        if (!ws[ref]) continue;
-        const style = ensureCellStyle(ws[ref]);
-        if (((r - headerRows + 1) % 2) === 0) {
-          style.fill = { patternType: 'solid', fgColor: { rgb: 'DDEBF7' }, bgColor: { rgb: 'DDEBF7' } };
-        }
-        style.alignment = { horizontal: c === 0 ? 'left' : 'center', vertical: 'center' };
-        style.border = createBorder();
-      }
-    }
-  };
-
-  const buildRankingAOA = (analysisList) => {
-    const sortedMap = RANK_METRICS.map(metric => ({
-      ...metric,
-      items: [...analysisList].sort((a, b) => b[metric.key] - a[metric.key])
-    }));
-    const aoa = [];
-    aoa.push(sortedMap.flatMap(metric => [metric.label, '', '']));
-    aoa.push(sortedMap.flatMap(() => ['排名', '客服名稱', '數值']));
-    for (let i = 0; i < analysisList.length; i++) {
-      aoa.push(sortedMap.flatMap(metric => {
-        const item = metric.items[i];
-        return [i + 1, item ? item.name : '', item ? `${item[metric.key].toFixed(2)}%` : ''];
-      }));
-    }
-    return aoa;
-  };
-
-  const styleRankingSheet = (ws, totalRows, totalCols) => {
-    for (let r = 0; r < totalRows; r++) {
-      for (let c = 0; c < totalCols; c++) {
-        const ref = XLSX.utils.encode_cell({ r, c });
-        if (!ws[ref]) continue;
-        const style = ensureCellStyle(ws[ref]);
-        style.border = createBorder();
-        style.alignment = { horizontal: 'center', vertical: 'center' };
-        if (r === 0) {
-          style.font = { bold: true, color: { rgb: 'FFFFFF' } };
-          style.fill = { patternType: 'solid', fgColor: { rgb: '1F4E78' }, bgColor: { rgb: '1F4E78' } };
-        } else if (r === 1) {
-          style.font = { bold: true, color: { rgb: '000000' } };
-          style.fill = { patternType: 'solid', fgColor: { rgb: 'DDEBF7' }, bgColor: { rgb: 'DDEBF7' } };
-        } else if (((c + 1) % 3) === 0) {
-          style.fill = { patternType: 'solid', fgColor: { rgb: 'F8FBFF' }, bgColor: { rgb: 'F8FBFF' } };
-        }
-      }
-    }
-  };
-
-  const handleExport = () => {
-    if (!results) return;
-    const wb = XLSX.utils.book_new();
-
-    const detailData = data.map(d => ({
-      '客服名稱': d.agent,
-      '班別': d.shift,
-      '日期': d.date,
-      '時間': d.time,
-      '遊戲專線': d.line,
-      '滿意度Q1': d.q1,
-      '滿意度Q2': d.q2,
-      '對話 ID': d.id
-    }));
-    const wsDetail = XLSX.utils.json_to_sheet(detailData);
-    wsDetail['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 36 }];
-    styleHeaderRow(wsDetail, 8);
-    colorEvenRows(wsDetail, 1);
-    applyBorders(wsDetail);
-    XLSX.utils.book_append_sheet(wb, wsDetail, '通話明細總表');
-
-    const summaryData = results.analysisList.map(a => ({
-      '客服名稱': a.name,
-      '班別': a.shift,
-      'GT': formatToHours(a.lines['GT']),
-      '儲值專線': formatToHours(a.lines['儲值專線']),
-      'GT+儲值專線': formatToHours(a.lines['GT+儲值專線']),
-      '滿貫專線': formatToHours(a.lines['滿貫專線']),
-      '金好運專線': formatToHours(a.lines['金好運專線'])
-    }));
-    const wsSummary = XLSX.utils.json_to_sheet(summaryData);
-    wsSummary['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 12 }];
-    styleHeaderRow(wsSummary, 7);
-    colorEvenRows(wsSummary, 1);
-    applyBorders(wsSummary);
-    XLSX.utils.book_append_sheet(wb, wsSummary, '專線接聽彙總');
-
-    const analysisData = results.analysisList.map(a => ({
-      '客服名稱': a.name,
-      '班別': a.shift,
-      '總通話數': a.totalCalls,
-      'Q1非常滿意': a.q1VerySatisfied,
-      'Q1尚可': a.q1Okay,
-      'Q1非常不滿意': a.q1VeryDissatisfied,
-      '人員滿意度(Q1)': a.q1SatRate.toFixed(2) + '%',
-      '人員調查率(Q1)': a.q1SurRate.toFixed(2) + '%',
-      'Q2非常滿意': a.q2VerySatisfied,
-      'Q2尚可': a.q2Okay,
-      'Q2非常不滿意': a.q2VeryDissatisfied,
-      '問題滿意度(Q2)': a.q2SatRate.toFixed(2) + '%',
-      '問題調查率(Q2)': a.q2SurRate.toFixed(2) + '%',
-      '整體滿意度平均': a.overallSatAvg.toFixed(2) + '%',
-      '整體調查率平均': a.overallSurAvg.toFixed(2) + '%',
-      '已回答(Q1)': a.q1Answered,
-      '已回答(Q2)': a.q2Answered
-    }));
-    const wsAnalysis = XLSX.utils.json_to_sheet(analysisData);
-    wsAnalysis['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 10 }];
-    styleHeaderRow(wsAnalysis, 17);
-    colorEvenRows(wsAnalysis, 1);
-    applyBorders(wsAnalysis);
-    XLSX.utils.book_append_sheet(wb, wsAnalysis, '滿意度分析表');
-
-    const rankingAOA = buildRankingAOA(results.analysisList);
-    const wsRanking = XLSX.utils.aoa_to_sheet(rankingAOA);
-    wsRanking['!cols'] = RANK_METRICS.flatMap(() => ([{ wch: 8 }, { wch: 12 }, { wch: 12 }]));
-    wsRanking['!merges'] = [];
-    RANK_METRICS.forEach((metric, idx) => {
-      wsRanking['!merges'].push({ s: { r: 0, c: idx * 3 }, e: { r: 0, c: idx * 3 + 2 } });
-    });
-    styleRankingSheet(wsRanking, rankingAOA.length, RANK_METRICS.length * 3);
-    XLSX.utils.book_append_sheet(wb, wsRanking, '滿意度排名表');
-
-    XLSX.writeFile(wb, `客服滿意度完整報告_${new Date().toLocaleDateString().replaceAll('/', '-')}.xlsx`);
-  };
-
-  const exportHistoryBackup = () => {
-    const backupData = { ...historyData };
-    const json = JSON.stringify(backupData, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
+  const handleLogout = async () => { if (firebaseReady && auth) { try { await auth.signOut(); } catch (error) { console.error("登出失敗", error); } } };
+  const exportShiftRules = () => {
+    const blob = new Blob([JSON.stringify(shiftRules, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `客服滿意度歷史備份_${new Date().toLocaleDateString().replaceAll('/', '-')}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const a = document.createElement("a"); a.href = url; a.download = "班表設定備份.json"; a.click(); URL.revokeObjectURL(url);
   };
 
-  if (!authReady) {
-    return <div className="min-h-screen flex items-center justify-center"><div className="bg-white p-10 rounded-3xl shadow-xl">載入中...</div></div>;
-  }
+  const exportRowsBundleToExcel = async (rows, summary, filenamePrefix = "資料匯出") => {
+    if (!rows.length) return alert("目前沒有資料可以匯出。");
+    if (!window.ExcelJS) return alert("Excel 匯出模組尚未載入完成。");
+    try {
+      const workbook = new window.ExcelJS.Workbook();
+      const lightBlueFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0F2FE" } };
+      const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F172A" } };
+      const headerFont = { color: { argb: "FFFFFFFF" }, bold: true };
+      const createFormattedSheet = (sheetName, headers, dataRows) => {
+        const sheet = workbook.addWorksheet(sheetName);
+        sheet.addRow(headers);
+        const headerRow = sheet.getRow(1);
+        headerRow.eachCell(cell => { cell.fill = headerFill; cell.font = headerFont; cell.alignment = { horizontal: "center", vertical: "middle" }; });
+        dataRows.forEach((rowData, index) => {
+          const row = sheet.addRow(rowData);
+          if (index % 2 === 1) row.eachCell(cell => { cell.fill = lightBlueFill; });
+          row.eachCell(cell => { cell.alignment = { horizontal: "center", vertical: "middle" }; });
+        });
+        sheet.columns.forEach(column => { column.width = 16; });
+        return sheet;
+      };
+      const sheet1Headers = ["客服名稱", "班別", "班別來源", "日期", "時間", "遊戲專線", "滿意度問題1", "滿意度問題2", "對話ID"];
+      const sheet1Data = rows.map(r => [r.agent, r.shift || "-", r.shiftSource || "-", formatCustomDate(r.date), r.time, r.line, r.q1, r.q2, r.id]);
+      const sheet1 = createFormattedSheet("一、通話明細", sheet1Headers, sheet1Data);
+      sheet1.getColumn(9).width = 38;
+      const sheet2Data = summary.handleRows.map(r => SUMMARY_HEADERS.map(h => ["客服名稱", "班別"].includes(h) ? (r[h] || "-") : Number(formatToHours(r[h]))));
+      createFormattedSheet("二、總處理時間", SUMMARY_HEADERS, sheet2Data);
+      const sheet3Data = summary.speakRows.map(r => SUMMARY_HEADERS.map(h => ["客服名稱", "班別"].includes(h) ? (r[h] || "-") : Number(formatToHours(r[h]))));
+      createFormattedSheet("三、總發話時間", SUMMARY_HEADERS, sheet3Data);
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      a.download = `${filenamePrefix}_${today}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Excel 匯出失敗:", err);
+      alert("匯出 Excel 時發生錯誤。");
+    }
+  };
+
+  const exportExcelData = async () => {
+    const safeLabel = String(weeklyExportLabel || "目前預覽資料").replace(/[\/:*?"<>|]/g, "_").replace(/\s+/g, "_");
+    const prefix = weeklyExportMode === "preview" ? `資料預覽與通話時間查詢_${safeLabel}` : `通話時間三表_${safeLabel}`;
+    await exportRowsBundleToExcel(weeklyExportRows, weeklyExportSummary, prefix);
+  };
+
+  const exportDetailExcel = async () => {
+    const summary = summarizePreviewRows(detailRows);
+    const tag = selectedDetailMode === "weeks" ? detailTitle.replace(/[（）～\s]/g, "_") : selectedDetailMode === "months" ? `${selectedDetailMonth}_明細查詢` : `${selectedDetailYear}_明細查詢`;
+    await exportRowsBundleToExcel(detailRows, summary, tag || "明細查詢");
+  };
+
+  if (!authReady) return <div className="min-h-screen flex items-center justify-center"><div className="bg-white px-10 py-8 rounded-3xl shadow">載入中...</div></div>;
 
   if (firebaseReady && !user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
         <form onSubmit={handleLogin} className="bg-white p-10 rounded-3xl shadow-xl w-full max-w-md border border-slate-200">
           <h2 className="text-3xl font-black mb-2 text-center text-slate-800">客服系統安全登入</h2>
-          <p className="text-slate-400 text-sm font-bold text-center mb-6">登入後才能使用雲端歷史資料同步</p>
+          <p className="text-slate-400 text-sm font-bold text-center mb-6">登入後會自動抓取雲端資料</p>
           {loginError && <div className="text-red-500 text-sm mb-4 text-center font-bold">{loginError}</div>}
-          <input type="email" placeholder="信箱" value={email} onChange={e => setEmail(e.target.value)} required className="w-full mb-4 p-3 rounded-xl border border-slate-300" />
-          <input type="password" placeholder="密碼" value={password} onChange={e => setPassword(e.target.value)} required className="w-full mb-6 p-3 rounded-xl border border-slate-300" />
+          <input type="email" placeholder="信箱" value={email} onChange={(e)=>setEmail(e.target.value)} required className="w-full mb-4 p-3 rounded-xl border border-slate-300" />
+          <input type="password" placeholder="密碼" value={password} onChange={(e)=>setPassword(e.target.value)} required className="w-full mb-6 p-3 rounded-xl border border-slate-300" />
           <button type="submit" className="w-full bg-blue-600 text-white font-bold p-3 rounded-xl hover:bg-blue-700">登入</button>
         </form>
       </div>
@@ -1111,575 +1466,366 @@ function App() {
   }
 
   return (
-    <div
-      className={`min-h-screen p-4 md:p-8 transition-colors ${isDragging ? 'bg-blue-50' : 'bg-slate-100'}`}
-      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-      onDragLeave={() => setIsDragging(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setIsDragging(false);
-        if (showUploadPanel) {
-          handleFilesUpload(Array.from(e.dataTransfer.files));
-        }
-      }}
-    >
-      <div className="max-w-[2200px] mx-auto">
-        {showUploadPanel && (
-          <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setShowUploadPanel(false); setIsDragging(false); }}>
-            <div className="w-full max-w-3xl bg-white rounded-[32px] shadow-2xl border border-slate-200 p-6 md:p-8" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-6 gap-4">
-                <div>
-                  <h2 className="text-2xl font-black text-slate-800">匯入檔案</h2>
-                  <p className="text-slate-400 font-bold text-sm mt-1">支援 Excel、CSV、JSON，可連續匯入多個檔案，完成後請自行按關閉</p>
-                </div>
-                <button onClick={() => { setShowUploadPanel(false); setIsDragging(false); }} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 font-bold hover:bg-slate-200">關閉</button>
-              </div>
-              <div className={`border-4 border-dashed rounded-[28px] p-8 md:p-12 text-center shadow-inner transition-all ${isDragging ? 'border-blue-400 bg-blue-50' : 'border-slate-200 bg-white'}`}>
-                <Icon name="upload-cloud" size={68} className={`mx-auto mb-5 ${isDragging ? 'text-blue-500' : 'text-slate-300'}`} />
-                <h3 className={`text-2xl font-black mb-3 ${isDragging ? 'text-blue-700' : 'text-slate-500'}`}>拖曳檔案到這裡上傳</h3>
-                <p className="text-sm md:text-base text-slate-400 font-bold mb-6">支援 .xlsx / .xls / .csv / .json</p>
-                <label className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-bold inline-flex items-center gap-2 hover:bg-blue-700 shadow-lg cursor-pointer active:scale-95 transition-all">
-                  <Icon name="folder-open" size={18} />
-                  選擇檔案
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept=".csv,.xlsx,.xls,.json"
-                    multiple
-                    onChange={(e) => {
-                      handleFilesUpload(Array.from(e.target.files));
-                      setIsDragging(false);
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-              </div>
-            </div>
+    <div className="min-h-screen p-4 md:p-8 bg-slate-100">
+      <div className="max-w-[2200px] mx-auto space-y-6">
+        <header className="flex justify-between items-center gap-4 flex-wrap">
+          <div>
+            <h1 className="text-3xl font-black text-slate-800 flex items-center gap-2">
+              <Icon name="cloud" size={30} className="text-blue-600" />
+              客服電話紀錄長期觀察系統（雲端主版｜週整合版）
+            </h1>
+            <p className="text-slate-400 font-bold mt-2">已加入：整月一鍵載入、多週合併預覽、整合來源顯示、預覽三表即時重算</p>
           </div>
-        )}
-
-        <header className="flex justify-between items-center mb-8 gap-4 flex-wrap">
-          <h1 className="text-3xl font-black text-slate-800 flex items-center gap-2">
-            <Icon name="bar-chart-3" size={32} className="text-blue-600" />
-            客服滿意度分析系統（登入雲端整合版）
-          </h1>
-          <div className="flex gap-4 flex-wrap items-center justify-end">
+          <div className="flex gap-3 flex-wrap items-center justify-end">
             <span className="text-sm font-bold text-slate-400">{syncStatus}</span>
             {user && <span className="text-sm bg-slate-200 px-3 py-1 rounded-full font-bold">{user.email}</span>}
-            
-            {historyMonths.length > 0 && (
-              <button onClick={clearAllData} className="bg-rose-500 text-white px-6 py-2.5 rounded-2xl font-bold flex items-center gap-2 hover:bg-rose-600 shadow-lg">
-                <Icon name="trash-2" size={18} />清空資料
-              </button>
-            )}
-
-            {historyMonths.length > 0 && (
-              <button onClick={exportHistoryBackup} className="bg-purple-600 text-white px-6 py-2.5 rounded-2xl font-bold flex items-center gap-2 hover:bg-purple-700 shadow-lg">
-                <Icon name="database" size={18} />備份歷史資料
-              </button>
-            )}
-            {data.length > 0 && (
-              <button onClick={handleExport} className="bg-emerald-600 text-white px-6 py-2.5 rounded-2xl font-bold flex items-center gap-2 hover:bg-emerald-700 shadow-lg">
-                <Icon name="download" size={18} />匯出報表
-              </button>
-            )}
-            <button onClick={() => setShowUploadPanel(true)} className="bg-blue-600 text-white px-8 py-2.5 rounded-2xl font-bold flex items-center gap-2 hover:bg-blue-700 shadow-lg">
-              <Icon name="file-plus" size={20} />匯入檔案
-            </button>
-            {firebaseReady && user && (
-              <button onClick={handleLogout} className="bg-slate-500 text-white px-6 py-2.5 rounded-2xl font-bold hover:bg-slate-600 shadow-lg">登出</button>
-            )}
+            <button title="重新從雲端抓資料" onClick={() => loadCloudBundle({ autoPreview: true })} className="w-11 h-11 rounded-2xl bg-indigo-600 text-white hover:bg-indigo-700 flex items-center justify-center shadow-sm"><Icon name="refresh-cw" size={18} /></button>
+            <button title="同步雲端" onClick={saveCurrentUploadToCloud} className="w-11 h-11 rounded-2xl bg-emerald-600 text-white hover:bg-emerald-700 flex items-center justify-center shadow-sm"><Icon name="cloud-upload" size={18} /></button>
+            <button title="刪除雲端資料" onClick={deleteSelectedCloudReports} className="w-11 h-11 rounded-2xl bg-rose-500 text-white hover:bg-rose-600 flex items-center justify-center shadow-sm"><Icon name="trash-2" size={18} /></button>
+            <button onClick={handleLogout} className="bg-slate-500 text-white px-5 py-2.5 rounded-2xl font-bold hover:bg-slate-600">登出</button>
           </div>
         </header>
 
-        {!data.length && historyMonths.length === 0 && !loading && (
-          <div className="bg-white rounded-[40px] shadow-sm border p-16 text-center mb-6">
-            <Icon name="folder-open" size={72} className="mx-auto text-slate-200 mb-5" />
-            <h2 className="text-2xl font-black text-slate-400 mb-3">請先按上方「匯入檔案」</h2>
-            <p className="text-slate-300 font-bold">開啟上傳視窗後，可用拖曳或選擇檔案匯入</p>
+        {uploadMessage && <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-5 py-4 rounded-2xl font-bold">{uploadMessage}</div>}
+
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div className="bg-white rounded-3xl border p-5 shadow-sm"><div className="text-sm text-slate-400 font-black mb-2">雲端資料筆數</div><div className="text-3xl font-black text-slate-800">{cloudIndex.length}</div></div>
+          <div className="bg-white rounded-3xl border p-5 shadow-sm"><div className="text-sm text-slate-400 font-black mb-2">已累積年份</div><div className="text-3xl font-black text-slate-800">{allYears.length}</div></div>
+          <div className="bg-white rounded-3xl border p-5 shadow-sm"><div className="text-sm text-slate-400 font-black mb-2">已累積月份</div><div className="text-3xl font-black text-slate-800">{allMonths.length}</div></div>
+          <div className="bg-white rounded-3xl border p-5 shadow-sm"><div className="text-sm text-slate-400 font-black mb-2">已累積週數</div><div className="text-3xl font-black text-slate-800">{allWeeks.length}</div></div>
+          <div className="bg-white rounded-3xl border p-5 shadow-sm"><div className="text-sm text-slate-400 font-black mb-2">目前預覽筆數</div><div className="text-3xl font-black text-slate-800">{previewRows.length}</div></div>
+        </div>
+
+        <div className="bg-white p-2 rounded-[28px] shadow-sm border border-slate-200 space-y-2">
+          <div className="flex gap-2 overflow-x-auto">
+            {[
+              { id:"weekly", name:"資料預覽與通話時間查詢", icon:"calendar-days" },
+              { id:"history", name:"長期歷史總覽", icon:"archive" },
+              { id:"trend", name:"趨勢分析", icon:"line-chart" },
+              { id:"detail", name:"明細查詢", icon:"list" },
+              { id:"shift", name:"班表設定", icon:"users" }
+            ].map(t => (
+              <button key={t.id} onClick={()=>setActiveTab(t.id)} className={`px-6 py-3 rounded-2xl font-black flex items-center gap-2 whitespace-nowrap ${activeTab===t.id ? "bg-blue-600 text-white" : "text-slate-400 hover:bg-slate-50"}`}>
+                <Icon name={t.icon} size={16} />{t.name}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2 overflow-x-auto pl-1">
+            {[
+              { id:"upload", name:"資料上傳", icon:"upload-cloud" },
+              { id:"cloud", name:"雲端已存資料", icon:"database" }
+            ].map(t => (
+              <button key={t.id} onClick={()=>setActiveTab(t.id)} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 whitespace-nowrap ${activeTab===t.id ? "bg-slate-700 text-white" : "text-slate-400 hover:bg-slate-50"}`}>
+                <Icon name={t.icon} size={14} />{t.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {activeTab === "shift" && (
+          <div className="bg-white rounded-[40px] shadow-sm border p-8 space-y-6">
+            <div className="flex flex-wrap gap-4 items-center justify-between">
+              <h3 className="text-xl font-black text-slate-800 underline decoration-blue-500 decoration-4 underline-offset-8">年月班表設定</h3>
+              <div className="flex items-center gap-3">
+                <div className="text-sm font-bold text-slate-400">不使用固定預設名單，全部以你頁面設定為主</div>
+                <button onClick={exportShiftRules} className="text-xs text-slate-500 underline hover:text-slate-700">班表備份</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="bg-slate-50 rounded-3xl border p-5 space-y-4">
+                <div className="font-black text-slate-700">新增月份班表</div>
+                <input value={shiftMonthInput} onChange={(e)=>setShiftMonthInput(e.target.value)} placeholder="例如 2026-04" className="w-full border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-700" />
+                <button onClick={addShiftMonth} className="w-full bg-blue-600 text-white px-4 py-3 rounded-2xl font-black hover:bg-blue-700">新增月份</button>
+                <div className="text-xs text-slate-400 font-bold">格式固定 YYYY-MM</div>
+              </div>
+              <div className="bg-slate-50 rounded-3xl border p-5 space-y-4 lg:col-span-2">
+                <div className="flex flex-wrap gap-3 items-center justify-between">
+                  <div className="font-black text-slate-700">選擇要編輯的班表</div>
+                  <div className="flex gap-2 flex-wrap">
+                    <select value={shiftEditorMonth} onChange={(e)=>setShiftEditorMonth(e.target.value)} className="border border-slate-300 rounded-xl px-4 py-2 font-bold text-slate-700 bg-white">
+                      {shiftMonthKeys.map(m => <option key={m} value={m}>{m === "default" ? "default（空白預設）" : m}</option>)}
+                    </select>
+                    {shiftEditorMonth !== "default" && <button onClick={()=>deleteShiftMonth(shiftEditorMonth)} className="bg-rose-500 text-white px-4 py-2 rounded-xl font-black hover:bg-rose-600">刪除此月份</button>}
+                    <button onClick={saveCurrentShiftMonth} className="bg-emerald-600 text-white px-4 py-2 rounded-xl font-black hover:bg-emerald-700">儲存班表</button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {["早班", "中班", "晚班"].map(shift => (
+                    <div key={shift} className="bg-white rounded-2xl border p-4 space-y-3">
+                      <div className="font-black text-slate-700">{shift}</div>
+                      <textarea rows="10" value={shiftDraft[shift]} onChange={(e)=>setShiftDraft(prev=>({...prev,[shift]:e.target.value}))} placeholder="請輸入名單，可用 、 或換行分隔" className="w-full border border-slate-300 rounded-xl px-3 py-3 text-sm text-slate-700"></textarea>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
-        {loading && <div className="text-center py-20 animate-pulse text-2xl font-black text-blue-500 uppercase">Analyzing...</div>}
-
-        {(data.length > 0 || historyMonths.length > 0) && (
-          <div className="space-y-6">
-            <div className="flex gap-2 bg-white p-2 rounded-[28px] shadow-sm border border-slate-200 overflow-x-auto">
-              {[
-                { id: 'summary', name: '專線接聽彙總', icon: 'clock' },
-                { id: 'analysis', name: '滿意度分析表', icon: 'file-text' },
-                { id: 'ranking', name: '滿意度排名表', icon: 'award' },
-                { id: 'history', name: '歷史資料總覽', icon: 'archive' },
-                { id: 'compare', name: '歷史比對分析', icon: 'git-compare' },
-                { id: 'master', name: '通話明細總表', icon: 'list' }
-              ].map(t => (
-                <button key={t.id} onClick={() => setActiveTab(t.id)} className={`px-6 py-3 rounded-2xl font-black flex items-center gap-2 transition-all whitespace-nowrap ${activeTab === t.id ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>
-                  <Icon name={t.icon} size={16} />{t.name}
-                </button>
-              ))}
+        {activeTab === "upload" && (
+          <div className="bg-white rounded-[40px] shadow-sm border p-8 space-y-6">
+            <div className="flex flex-wrap gap-4 items-center justify-between">
+              <h3 className="text-xl font-black text-slate-800 underline decoration-blue-500 decoration-4 underline-offset-8">資料上傳</h3>
+              <div className="text-sm font-bold text-slate-400">目前可讀 csv / xlsx / xls，支援單週、多週、整月資料上傳</div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-slate-50 rounded-3xl border p-5"><div className="text-sm text-slate-400 font-black mb-2">原始筆數</div><div className="text-3xl font-black text-slate-800">{csvResult.rawCount}</div></div>
+              <div className="bg-slate-50 rounded-3xl border p-5"><div className="text-sm text-slate-400 font-black mb-2">符合條件筆數</div><div className="text-3xl font-black text-slate-800">{csvResult.validCount}</div></div>
+              <div className="bg-slate-50 rounded-3xl border p-5"><div className="text-sm text-slate-400 font-black mb-2">客服人數</div><div className="text-3xl font-black text-slate-800">{csvResult.agentCount}</div></div>
+              <div className="bg-slate-50 rounded-3xl border p-5"><div className="text-sm text-slate-400 font-black mb-2">來源檔名</div><div className="text-base font-black text-slate-800 break-all">{csvFileName || "-"}</div></div>
             </div>
 
-            {activeTab === 'summary' && results && (
-              <div className="bg-white rounded-[40px] shadow-sm border p-8">
-                <h3 className="text-xl font-black text-slate-800 mb-6 underline decoration-blue-500 decoration-4 underline-offset-8">各專員專線接聽小時數 (H)</h3>
-                <div className="overflow-x-auto custom-scrollbar rounded-3xl border">
-                  <table className="w-full text-left text-xs whitespace-nowrap">
-                    <thead className="bg-slate-900 text-white font-black">
-                      <tr>
-                        <th className="px-6 py-5 sticky-col shadow-xl bg-slate-900">客服名稱</th>
-                        <th className="px-6 py-5 text-center">班別</th>
-                        {QUEUE_LIST.map(q => <th key={q} className="px-6 py-5 text-center">{q}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-bold text-slate-600">
-                      {results.analysisList.map(a => (
-                        <tr key={a.name} className="hover:bg-blue-50/50">
-                          <td className="px-6 py-4 sticky-col font-black text-slate-700 border-r">{a.name}</td>
-                          <td className="px-6 py-4 text-center">{a.shift}</td>
-                          {QUEUE_LIST.map(q => <td key={q} className="px-6 py-4 text-center font-mono">{formatToHours(a.lines[q])}</td>)}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+            <div className="bg-slate-50 rounded-3xl border p-5 grid grid-cols-1 lg:grid-cols-3 gap-4 items-end">
+              <div>
+                <div className="text-sm text-slate-400 font-black mb-2">上傳判斷模式</div>
+                <select value={uploadMode} onChange={(e)=>setUploadMode(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-700 bg-white">
+                  <option value="auto">自動判斷（建議）</option>
+                  <option value="single_week">固定單週模式</option>
+                  <option value="multi_week">固定整批模式</option>
+                </select>
               </div>
-            )}
+              <div className="lg:col-span-2 text-sm font-bold text-slate-500 leading-7">
+                自動判斷：1週就當單週，多於1週就全部保留。<br />
+                固定單週模式：只保留筆數最多的那一週。<br />
+                固定整批模式：適合一次上傳整月或多週資料。
+              </div>
+            </div>
 
-            {activeTab === 'analysis' && results && (
-              <div className="bg-white rounded-[40px] shadow-sm border p-8">
-                <h3 className="text-xl font-black text-slate-800 mb-6 underline decoration-blue-500 decoration-4 underline-offset-8">客服滿意度分析報表</h3>
+            <div onDragOver={handleDragOver} onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDrop={handleDrop} className={`border-4 border-dashed rounded-[28px] p-10 text-center transition-colors duration-200 ${isDragging ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-slate-50"}`}>
+              <div className="text-2xl font-black text-slate-700 mb-3">拖曳或選擇資料檔</div>
+              <div className="text-sm text-slate-400 font-bold mb-6">支援格式：csv / xlsx / xls</div>
+              <div className="flex gap-3 justify-center flex-wrap">
+                <button onClick={()=>fileInputRef.current?.click()} className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-black hover:bg-blue-700">選擇檔案</button>
+                <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e)=>{ const f=e.target.files?.[0]; if (f) handleDataUpload(f); e.target.value=''; }} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "weekly" && (
+          <div className="bg-white rounded-[40px] shadow-sm border p-8 space-y-8">
+            <div className="flex flex-wrap gap-4 items-center justify-between">
+              <div>
+                <h3 className="text-xl font-black text-slate-800 underline decoration-blue-500 decoration-4 underline-offset-8">資料預覽與通話時間查詢</h3>
+                <div className="text-xs text-slate-400 font-bold mt-2">登入或重新整理後，會自動顯示最新雲端資料；也可手動切回最新一筆。</div>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <button onClick={loadLatestCloudPreview} className="bg-blue-600 text-white px-5 py-2.5 rounded-2xl font-bold hover:bg-blue-700 flex items-center gap-2"><Icon name="refresh-cw" size={18} />載入最新雲端資料</button>
+                <div className="flex flex-wrap gap-2 items-center justify-end">
+                <select value={weeklyExportMode} onChange={(e)=>setWeeklyExportMode(e.target.value)} className="border border-slate-300 rounded-xl px-4 py-2.5 font-bold text-slate-700 bg-white">
+                  <option value="preview">匯出目前預覽</option>
+                  <option value="weeks">匯出指定週</option>
+                  <option value="months">匯出指定月</option>
+                  <option value="years">匯出指定年</option>
+                </select>
+                {weeklyExportMode === "weeks" && <select value={weeklyExportWeek} onChange={(e)=>setWeeklyExportWeek(e.target.value)} className="border border-slate-300 rounded-xl px-4 py-2.5 font-bold text-slate-700 bg-white min-w-[220px]"><option value="">請選擇週次</option>{allWeeks.map(week => <option key={week} value={week}>{formatWeekDisplay(week, cloudMasterStore.weeks?.[week]?.periodLabel || "")}</option>)}</select>}
+                {weeklyExportMode === "months" && <select value={weeklyExportMonth} onChange={(e)=>setWeeklyExportMonth(e.target.value)} className="border border-slate-300 rounded-xl px-4 py-2.5 font-bold text-slate-700 bg-white min-w-[180px]"><option value="">請選擇月份</option>{allMonths.map(month => <option key={month} value={month}>{formatMonthDisplay(month)}</option>)}</select>}
+                {weeklyExportMode === "years" && <select value={weeklyExportYear} onChange={(e)=>setWeeklyExportYear(e.target.value)} className="border border-slate-300 rounded-xl px-4 py-2.5 font-bold text-slate-700 bg-white min-w-[140px]"><option value="">請選擇年份</option>{allYears.map(year => <option key={year} value={year}>{formatYearDisplay(year)}</option>)}</select>}
+                <button onClick={exportExcelData} className="bg-emerald-600 text-white px-5 py-2.5 rounded-2xl font-bold hover:bg-emerald-700 flex items-center gap-2"><Icon name="download" size={18} />匯出 Excel</button>
+              </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+              <div className="bg-slate-50 rounded-3xl border p-5 lg:col-span-2">
+                <div className="text-sm text-slate-400 font-black mb-2">目前模式</div>
+                <div className="text-xl font-black text-slate-800">{previewMeta.title}</div>
+              </div>
+              <div className="bg-slate-50 rounded-3xl border p-5"><div className="text-sm text-slate-400 font-black mb-2">來源週數</div><div className="text-3xl font-black text-slate-800">{previewMeta.weekKeys.length}</div></div>
+              <div className="bg-slate-50 rounded-3xl border p-5"><div className="text-sm text-slate-400 font-black mb-2">合併前筆數</div><div className="text-3xl font-black text-slate-800">{previewMeta.recordCountBeforeDedupe}</div></div>
+              <div className="bg-slate-50 rounded-3xl border p-5"><div className="text-sm text-slate-400 font-black mb-2">去重後筆數</div><div className="text-3xl font-black text-slate-800">{previewMeta.recordCountAfterDedupe}</div></div>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-3xl p-5 text-sm font-bold text-blue-800 space-y-2">
+              <div>整合月份：{previewMeta.monthKeys.length ? previewMeta.monthKeys.join("、") : "-"}</div>
+              <div>整合週次：{previewMeta.weekKeys.length ? previewMeta.weekKeys.map(w => formatWeekKeyZh(w)).join("、") : "-"}</div>
+              <div>整合年份：{previewMeta.yearKeys.length ? previewMeta.yearKeys.join("、") : "-"}</div>
+              <div className="mt-2 text-blue-700">目前匯出設定：{weeklyExportLabel}</div>
+            </div>
+
+            <div className="space-y-8">
+              <div>
+                <div className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2"><Icon name="list" size={20} className="text-blue-500"/>一、通話明細</div>
                 <div className="overflow-x-auto custom-scrollbar rounded-3xl border">
-                  <table className="w-full text-left text-[10px] whitespace-nowrap border-collapse text-center">
-                    <thead className="bg-slate-900 text-white font-black uppercase">
-                      <tr>
-                        <th className="px-4 py-4 sticky-col shadow-xl text-left border-r bg-slate-900">客服名稱</th>
-                        <th className="px-2 py-4">班別</th>
-                        <th className="px-2 py-4">總通話數</th>
-                        <th className="px-2 py-4 bg-slate-800">Q1非常滿意</th>
-                        <th className="px-2 py-4 bg-slate-800">Q1尚可</th>
-                        <th className="px-2 py-4 bg-slate-800">Q1非常不滿意</th>
-                        <th className="px-2 py-4 bg-slate-800">人員滿意度(Q1)</th>
-                        <th className="px-2 py-4 bg-slate-800">人員調查率(Q1)</th>
-                        <th className="px-2 py-4 bg-slate-700">Q2非常滿意</th>
-                        <th className="px-2 py-4 bg-slate-700">Q2尚可</th>
-                        <th className="px-2 py-4 bg-slate-700">Q2非常不滿意</th>
-                        <th className="px-2 py-4 bg-slate-700">問題滿意度(Q2)</th>
-                        <th className="px-2 py-4 bg-slate-700">問題調查率(Q2)</th>
-                        <th className="px-2 py-4 bg-blue-900">整體滿意度平均</th>
-                        <th className="px-2 py-4">整體調查率平均</th>
-                      </tr>
-                    </thead>
+                  <table className="w-full text-center text-sm whitespace-nowrap">
+                    <thead className="bg-slate-900 text-white font-black"><tr><th className="px-4 py-4">客服名稱</th><th className="px-4 py-4">班別</th><th className="px-4 py-4">日期</th><th className="px-4 py-4">時間</th><th className="px-4 py-4">遊戲專線</th><th className="px-4 py-4">滿意度問題1</th><th className="px-4 py-4">滿意度問題2</th><th className="px-4 py-4">對話ID</th></tr></thead>
                     <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                      {results.analysisList.map(a => (
-                        <tr key={a.name} className="hover:bg-blue-50/20">
-                          <td className="px-4 py-3 sticky-col text-left font-black text-slate-700 border-r">{a.name}</td>
-                          <td className="px-2 py-3 text-slate-400 font-normal">{a.shift}</td>
-                          <td className="px-2 py-3 font-mono">{a.totalCalls}</td>
-                          <td className="px-2 py-3 bg-slate-50">{a.q1VerySatisfied}</td>
-                          <td className="px-2 py-3 bg-slate-50">{a.q1Okay}</td>
-                          <td className="px-2 py-3 bg-slate-50">{a.q1VeryDissatisfied}</td>
-                          <td className="px-2 py-3 bg-slate-50 font-mono">{a.q1SatRate.toFixed(1)}%</td>
-                          <td className="px-2 py-3 bg-slate-50 font-mono">{a.q1SurRate.toFixed(1)}%</td>
-                          <td className="px-2 py-3 bg-slate-100/50">{a.q2VerySatisfied}</td>
-                          <td className="px-2 py-3 bg-slate-100/50">{a.q2Okay}</td>
-                          <td className="px-2 py-3 bg-slate-100/50">{a.q2VeryDissatisfied}</td>
-                          <td className="px-2 py-3 bg-slate-100/50 font-mono">{a.q2SatRate.toFixed(1)}%</td>
-                          <td className="px-2 py-3 bg-slate-100/50 font-mono">{a.q2SurRate.toFixed(1)}%</td>
-                          <td className="px-2 py-3 bg-blue-50 text-blue-700 font-black">{a.overallSatAvg.toFixed(1)}%</td>
-                          <td className="px-2 py-3 font-mono text-slate-400">{a.overallSurAvg.toFixed(1)}%</td>
+                      {previewRows.length === 0 ? <tr><td colSpan="9" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewRows.map((r, i) => (
+                        <tr key={i} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
+                          <td className="px-4 py-4">{r.agent}</td><td className="px-4 py-4">{r.shift || "-"}</td><td className="px-4 py-4">{r.shiftSource || "-"}</td><td className="px-4 py-4">{formatCustomDate(r.date)}</td><td className="px-4 py-4">{r.time}</td><td className="px-4 py-4">{r.line}</td><td className="px-4 py-4">{r.q1}</td><td className="px-4 py-4">{r.q2}</td><td className="px-4 py-4">{r.id}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               </div>
-            )}
 
-            {activeTab === 'ranking' && results && (
-              <div className="bg-white rounded-[40px] shadow-sm border p-8">
-                <h3 className="text-xl font-black text-slate-800 mb-8 underline decoration-blue-500 decoration-4 underline-offset-8">客服指標分項完整排名表</h3>
+              <div>
+                <div className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2"><Icon name="clock" size={20} className="text-emerald-500"/>二、電話接聽時數_總處理時間</div>
                 <div className="overflow-x-auto custom-scrollbar rounded-3xl border">
-                  <table className="w-full text-center text-[11px] border-collapse whitespace-nowrap">
-                    <thead>
-                      <tr className="bg-slate-900 text-white font-black">
-                        {RANK_METRICS.map(metric => <th key={metric.key} colSpan="3" className="px-4 py-4 border-r border-slate-700 last:border-r-0">{metric.label}</th>)}
-                      </tr>
-                      <tr className="bg-sky-50 text-slate-600 font-black uppercase">
-                        {RANK_METRICS.map(metric => (
-                          <React.Fragment key={metric.key}>
-                            <th className="px-3 py-3 border-r border-slate-200">排名</th>
-                            <th className="px-3 py-3 border-r border-slate-200">客服名稱</th>
-                            <th className="px-3 py-3 border-r border-slate-300">數值</th>
-                          </React.Fragment>
-                        ))}
-                      </tr>
-                    </thead>
+                  <table className="w-full text-center text-sm whitespace-nowrap">
+                    <thead className="bg-slate-900 text-white font-black"><tr>{SUMMARY_HEADERS.map(h => <th key={h} className="px-4 py-4">{h}</th>)}</tr></thead>
                     <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                      {Array.from({ length: results.analysisList.length }).map((_, rowIndex) => (
-                        <tr key={rowIndex} className="hover:bg-slate-50">
-                          {RANK_METRICS.map(metric => {
-                            const sorted = [...results.analysisList].sort((a, b) => b[metric.key] - a[metric.key]);
-                            const item = sorted[rowIndex];
-                            const isTop = rowIndex === 0;
-                            return (
-                              <React.Fragment key={metric.key}>
-                                <td className="px-3 py-3 border-r border-slate-100">
-                                  <span className={`inline-flex items-center justify-center w-6 h-6 rounded-lg text-[10px] font-black ${isTop ? 'bg-amber-400 text-white' : 'bg-slate-100 text-slate-500'}`}>{rowIndex + 1}</span>
-                                </td>
-                                <td className={`px-3 py-3 border-r border-slate-100 ${isTop ? 'text-amber-700 bg-amber-50/60' : ''}`}>{item?.name || ''}</td>
-                                <td className={`px-3 py-3 border-r border-slate-200 font-mono text-blue-600 ${isTop ? 'bg-amber-50/30' : ''}`}>{item ? `${item[metric.key].toFixed(2)}%` : ''}</td>
-                              </React.Fragment>
-                            );
-                          })}
+                      {previewSummary.handleRows.length === 0 ? <tr><td colSpan="8" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewSummary.handleRows.map((r, i) => (
+                        <tr key={i} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
+                          {SUMMARY_HEADERS.map(h => <td key={h} className="px-4 py-4">{["客服名稱", "班別"].includes(h) ? (r[h] || "-") : formatToHours(r[h])}</td>)}
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               </div>
-            )}
 
-            {activeTab === 'history' && (
-              <div className="bg-white rounded-[40px] shadow-sm border p-8">
-                <div className="flex justify-between items-center mb-6 gap-4 flex-wrap">
-                  <h3 className="text-xl font-black text-slate-800 underline decoration-purple-500 decoration-4 underline-offset-8">歷史資料總覽</h3>
-                  <select value={selectedHistoryMonth} onChange={(e) => setSelectedHistoryMonth(e.target.value)} className="border border-slate-300 rounded-xl px-4 py-2 font-bold text-slate-600">
-                    <option value="">全部月份</option>
-                    {historyMonths.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                {historyMonths.length === 0 ? (
-                  <div className="text-center py-20 text-slate-400 font-bold">尚無歷史資料，請先匯入月報檔或 JSON 備份檔。</div>
-                ) : (
-                  <div className="overflow-x-auto custom-scrollbar rounded-3xl border">
-                    <table className="w-full text-center text-sm whitespace-nowrap">
-                      <thead className="bg-slate-900 text-white font-black">
-                        <tr>
-                          <th className="px-6 py-4">月份</th>
-                          <th className="px-6 py-4">總來電通數</th>
-                          <th className="px-6 py-4">整體滿意度平均</th>
-                          <th className="px-6 py-4">整體調查率平均</th>
-                          <th className="px-6 py-4">GT</th>
-                          <th className="px-6 py-4">儲值專線</th>
-                          <th className="px-6 py-4">GT+儲值專線</th>
-                          <th className="px-6 py-4">滿貫專線</th>
-                          <th className="px-6 py-4">金好運專線</th>
+              <div>
+                <div className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2"><Icon name="mic" size={20} className="text-purple-500"/>三、電話接聽時數_總發話時間</div>
+                <div className="overflow-x-auto custom-scrollbar rounded-3xl border">
+                  <table className="w-full text-center text-sm whitespace-nowrap">
+                    <thead className="bg-slate-900 text-white font-black"><tr>{SUMMARY_HEADERS.map(h => <th key={h} className="px-4 py-4">{h}</th>)}</tr></thead>
+                    <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
+                      {previewSummary.speakRows.length === 0 ? <tr><td colSpan="8" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewSummary.speakRows.map((r, i) => (
+                        <tr key={i} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
+                          {SUMMARY_HEADERS.map(h => <td key={h} className="px-4 py-4">{["客服名稱", "班別"].includes(h) ? (r[h] || "-") : formatToHours(r[h])}</td>)}
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 font-bold text-slate-600">
-                        {historyMonths
-                          .filter(m => !selectedHistoryMonth || m === selectedHistoryMonth)
-                          .map(m => {
-                            const h = historyData[m];
-                            return (
-                              <tr key={m} className="hover:bg-purple-50">
-                                <td className="px-6 py-4 font-black text-purple-700">{m}</td>
-                                <td className="px-6 py-4 font-mono">{h.teamTotalCalls || 0}</td>
-                                <td className="px-6 py-4 font-mono text-emerald-600">{formatPercent(h.overallSatAvg)}</td>
-                                <td className="px-6 py-4 font-mono text-blue-600">{formatPercent(h.overallSurAvg)}</td>
-                                <td className="px-6 py-4 font-mono">{formatToHours((h.teamLineTime && h.teamLineTime['GT']) || 0)}</td>
-                                <td className="px-6 py-4 font-mono">{formatToHours((h.teamLineTime && h.teamLineTime['儲值專線']) || 0)}</td>
-                                <td className="px-6 py-4 font-mono">{formatToHours((h.teamLineTime && h.teamLineTime['GT+儲值專線']) || 0)}</td>
-                                <td className="px-6 py-4 font-mono">{formatToHours((h.teamLineTime && h.teamLineTime['滿貫專線']) || 0)}</td>
-                                <td className="px-6 py-4 font-mono">{formatToHours((h.teamLineTime && h.teamLineTime['金好運專線']) || 0)}</td>
-                              </tr>
-                            );
-                          })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {activeTab === 'compare' && (
-              <div className="bg-white rounded-[40px] shadow-sm border p-8">
-                <h3 className="text-xl font-black text-slate-800 mb-6 underline decoration-purple-500 decoration-4 underline-offset-8">歷史比對分析</h3>
-
-                <div className="flex flex-wrap gap-3 mb-6">
-                  <button onClick={() => setCompareMode('multi')} className={`px-4 py-2 rounded-2xl font-black ${compareMode === 'multi' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>多人比較</button>
-                  <button onClick={() => setCompareMode('yearSelf')} className={`px-4 py-2 rounded-2xl font-black ${compareMode === 'yearSelf' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}>個人年度對比</button>
-                </div>
-
-                {compareMode === 'multi' ? (
-                  <>
-                    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
-                      <div className="bg-slate-50 rounded-3xl p-5 border">
-                        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                          <div className="font-black text-slate-700">年份</div>
-                          <div className="flex gap-2">
-                            <button className="px-3 py-1 bg-blue-100 text-blue-700 rounded-xl text-xs font-black" onClick={() => setSelectedYears([...availableYears])}>全選</button>
-                            <button className="px-3 py-1 bg-slate-200 text-slate-700 rounded-xl text-xs font-black" onClick={() => setSelectedYears([])}>清除</button>
-                          </div>
-                        </div>
-                        <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
-                          {availableYears.map(year => (
-                            <label key={year} className="flex items-center gap-2 text-sm font-bold text-slate-600">
-                              <input type="checkbox" checked={selectedYears.includes(year)} onChange={() => toggleMultiSelect(year, selectedYears, setSelectedYears)} />{year}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="bg-slate-50 rounded-3xl p-5 border">
-                        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-                          <div className="font-black text-slate-700">月份</div>
-                          <div className="flex gap-2">
-                            <button className="px-3 py-1 bg-blue-100 text-blue-700 rounded-xl text-xs font-black" onClick={() => setSelectedMonths([...availableMonthNumbers])}>全選</button>
-                            <button className="px-3 py-1 bg-slate-200 text-slate-700 rounded-xl text-xs font-black" onClick={() => setSelectedMonths([])}>清除</button>
-                          </div>
-                        </div>
-                        <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
-                          {availableMonthNumbers.map(month => (
-                            <label key={month} className="flex items-center gap-2 text-sm font-bold text-slate-600">
-                              <input type="checkbox" checked={selectedMonths.includes(month)} onChange={() => toggleMultiSelect(month, selectedMonths, setSelectedMonths)} />{month}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="bg-slate-50 rounded-3xl p-5 border">
-                        <div className="font-black text-slate-700 mb-3">客服人員</div>
-                        <div className="mb-3 flex gap-2 flex-wrap">
-                          <button className="px-3 py-1 bg-blue-100 text-blue-700 rounded-xl text-xs font-black" onClick={() => setSelectedAgents([...availableAgents])}>全選</button>
-                          <button className="px-3 py-1 bg-slate-200 text-slate-700 rounded-xl text-xs font-black" onClick={() => setSelectedAgents([])}>清除</button>
-                        </div>
-                        <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
-                          {availableAgents.map(agent => (
-                            <label key={agent} className="flex items-center gap-2 text-sm font-bold text-slate-600">
-                              <input type="checkbox" checked={selectedAgents.includes(agent)} onChange={() => toggleMultiSelect(agent, selectedAgents, setSelectedAgents)} />{agent}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="bg-slate-50 rounded-3xl p-5 border">
-                        <div className="font-black text-slate-700 mb-3">比對指標</div>
-                        <select value={selectedMetric} onChange={(e) => setSelectedMetric(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-600 bg-white">
-                          {HISTORY_METRICS.map(metric => <option key={metric.key} value={metric.key}>{metric.label}</option>)}
-                        </select>
-                        <div className="mt-4 text-xs text-slate-400 font-bold">已選月份：{filteredHistoryMonths.length} 個</div>
-                        <div className="mt-2 text-xs text-slate-400 font-bold">已選人員：{filteredAgents.length} 位</div>
-                      </div>
-                    </div>
-
-                    {filteredHistoryMonths.length === 0 ? (
-                      <div className="text-center py-16 text-slate-400 font-bold">目前沒有符合條件的歷史資料</div>
-                    ) : (
-                      <div className="space-y-8">
-                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                          <div className="bg-slate-50 rounded-[28px] border p-6">
-                            <div className="flex items-center justify-between gap-4 flex-wrap mb-4">
-                              <div>
-                                <div className="text-lg font-black text-slate-800">單人趨勢圖</div>
-                                <div className="text-sm text-slate-400 font-bold">可觀察單一客服跨月份變化</div>
-                              </div>
-                              <select value={singleTrendAgent} onChange={(e) => setSingleTrendAgent(e.target.value)} className="border border-slate-300 rounded-xl px-4 py-2 font-bold text-slate-600 bg-white">
-                                {availableAgents.map(agent => <option key={agent} value={agent}>{agent}</option>)}
-                              </select>
-                            </div>
-                            {singleTrendData && <HistoryChart type={singleTrendData.labels.length <= 1 ? 'bar' : 'line'} labels={singleTrendData.labels} datasets={singleTrendData.datasets} title={`${singleTrendAgent} 趨勢圖`} />}
-                          </div>
-
-                          <div className="bg-slate-50 rounded-[28px] border p-6">
-                            <div className="mb-4">
-                              <div className="text-lg font-black text-slate-800">多人比較圖</div>
-                              <div className="text-sm text-slate-400 font-bold">比較多位客服在相同月份的表現差異</div>
-                            </div>
-                            {multiCompareChartData && <HistoryChart type="bar" labels={multiCompareChartData.labels} datasets={multiCompareChartData.datasets} title={`多人比較｜${selectedMetricConfig.label}`} />}
-                          </div>
-                        </div>
-
-                        <div className="overflow-x-auto custom-scrollbar rounded-3xl border">
-                          <table className="w-full text-center text-sm whitespace-nowrap">
-                            <thead className="bg-slate-900 text-white font-black">
-                              <tr>
-                                <th className="px-6 py-4 sticky-col bg-slate-900">客服名稱</th>
-                                <th className="px-4 py-4">班別</th>
-                                {filteredHistoryMonths.map(month => <th key={month} className="px-6 py-4">{month}</th>)}
-                                <th className="px-6 py-4 text-emerald-300">平均</th>
-                                <th className="px-6 py-4 text-blue-300">加總</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                              {comparisonTable.map(row => (
-                                <tr key={row.name} className="hover:bg-purple-50">
-                                  <td className="px-6 py-4 sticky-col bg-white text-left font-black border-r">{row.name}</td>
-                                  <td className="px-4 py-4 text-slate-500">{row.shift}</td>
-                                  {filteredHistoryMonths.map(month => <td key={month} className="px-6 py-4 font-mono">{formatMetricValue(row[month])}</td>)}
-                                  <td className="px-6 py-4 font-mono text-emerald-600">{formatMetricValue(row.avg)}</td>
-                                  <td className="px-6 py-4 font-mono text-blue-600">{formatMetricValue(row.sum)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                      <div className="bg-slate-50 rounded-3xl p-5 border">
-                        <div className="font-black text-slate-700 mb-3">客服人員</div>
-                        <select value={yearCompareAgent} onChange={(e) => setYearCompareAgent(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-600 bg-white">
-                          {availableAgents.map(agent => <option key={agent} value={agent}>{agent}</option>)}
-                        </select>
-                      </div>
-                      <div className="bg-slate-50 rounded-3xl p-5 border">
-                        <div className="font-black text-slate-700 mb-3">比對指標</div>
-                        <select value={selectedMetric} onChange={(e) => setSelectedMetric(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-600 bg-white">
-                          {HISTORY_METRICS.map(metric => <option key={metric.key} value={metric.key}>{metric.label}</option>)}
-                        </select>
-                      </div>
-                      <div className="bg-slate-50 rounded-3xl p-5 border">
-                        <div className="font-black text-slate-700 mb-3">比較年度</div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <select value={compareYearA} onChange={(e) => setCompareYearA(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-600 bg-white">
-                            {availableYears.map(year => <option key={year} value={year}>{year}</option>)}
-                          </select>
-                          <select value={compareYearB} onChange={(e) => setCompareYearB(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-600 bg-white">
-                            {availableYears.map(year => <option key={year} value={year}>{year}</option>)}
-                          </select>
-                        </div>
-                      </div>
-                      <div className="bg-slate-50 rounded-3xl p-5 border">
-                        <div className="font-black text-slate-700 mb-3">比較方式</div>
-                        <div className="grid grid-cols-1 gap-2">
-                          <button onClick={() => setCompareView('annual')} className={`px-4 py-2 rounded-2xl font-black ${compareView === 'annual' ? 'bg-purple-600 text-white' : 'bg-white border text-slate-600'}`}>年度平均</button>
-                          <button onClick={() => setCompareView('monthly')} className={`px-4 py-2 rounded-2xl font-black ${compareView === 'monthly' ? 'bg-purple-600 text-white' : 'bg-white border text-slate-600'}`}>同月份比較</button>
-                          <button onClick={() => setCompareView('cumulative')} className={`px-4 py-2 rounded-2xl font-black ${compareView === 'cumulative' ? 'bg-purple-600 text-white' : 'bg-white border text-slate-600'}`}>累積比較</button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {yearlySelfCompare ? (
-                      <>
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                          <div className="bg-blue-50 rounded-3xl border border-blue-100 p-5">
-                            <div className="text-sm font-black text-slate-500 mb-2">{compareYearA}</div>
-                            <div className="text-2xl font-black text-blue-700">{formatCompareDisplay(yearlySelfCompare.summaryA)}</div>
-                          </div>
-                          <div className="bg-green-50 rounded-3xl border border-green-100 p-5">
-                            <div className="text-sm font-black text-slate-500 mb-2">{compareYearB}</div>
-                            <div className="text-2xl font-black text-green-700">{formatCompareDisplay(yearlySelfCompare.summaryB)}</div>
-                          </div>
-                          <div className="bg-purple-50 rounded-3xl border border-purple-100 p-5">
-                            <div className="text-sm font-black text-slate-500 mb-2">差異</div>
-                            <div className={`text-2xl font-black ${yearlySelfCompare.diff >= 0 ? 'text-purple-700' : 'text-rose-600'}`}>{formatCompareDiff(yearlySelfCompare.diff)}</div>
-                          </div>
-                          <div className="bg-slate-50 rounded-3xl border p-5">
-                            <div className="text-sm font-black text-slate-500 mb-2">結果</div>
-                            <div className={`text-2xl font-black ${yearlySelfCompare.diff >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{yearlySelfCompare.diff >= 0 ? '較前一年進步' : '較前一年下降'}</div>
-                          </div>
-                        </div>
-
-                        <div className="bg-slate-50 rounded-[28px] border p-6">
-                          <div className="text-lg font-black text-slate-800 mb-4">
-                            {compareView === 'annual' ? '年度總平均比較' : compareView === 'monthly' ? '同月份跨年度比較' : '年度累積比較'}
-                          </div>
-                          {compareView === 'annual' && <HistoryChart type="bar" labels={yearlySelfCompare.annualBar.labels} datasets={yearlySelfCompare.annualBar.datasets} title={`${yearCompareAgent}｜年度平均比較`} />}
-                          {compareView === 'monthly' && <HistoryChart type="line" labels={yearlySelfCompare.monthlyChart.labels} datasets={yearlySelfCompare.monthlyChart.datasets} title={`${yearCompareAgent}｜${compareYearA} vs ${compareYearB}`} />}
-                          {compareView === 'cumulative' && <HistoryChart type="line" labels={yearlySelfCompare.cumulativeChart.labels} datasets={yearlySelfCompare.cumulativeChart.datasets} title={`${yearCompareAgent}｜累積比較`} />}
-                        </div>
-
-                        <div className="overflow-x-auto custom-scrollbar rounded-3xl border">
-                          <table className="w-full text-center text-sm whitespace-nowrap">
-                            <thead className="bg-slate-900 text-white font-black">
-                              <tr>
-                                <th className="px-6 py-4">月份</th>
-                                <th className="px-6 py-4">{compareYearA}</th>
-                                <th className="px-6 py-4">{compareYearB}</th>
-                                <th className="px-6 py-4">差異</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                              {yearlySelfCompare.monthlyTable.map(row => (
-                                <tr key={row.month} className="hover:bg-purple-50">
-                                  <td className="px-6 py-4 font-black text-slate-700">{row.month}月</td>
-                                  <td className="px-6 py-4 font-mono">{formatCompareDisplay(row.yearA)}</td>
-                                  <td className="px-6 py-4 font-mono">{formatCompareDisplay(row.yearB)}</td>
-                                  <td className={`px-6 py-4 font-mono ${row.diff >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatCompareDiff(row.diff)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="text-center py-16 text-slate-400 font-bold">目前沒有足夠的跨年資料可比較</div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {activeTab === 'master' && (
-              <div className="bg-white rounded-[40px] shadow-sm border overflow-hidden p-8">
-                <div className="flex flex-wrap gap-4 items-center justify-between mb-6">
-                  <div className="flex flex-wrap gap-3">
-                    <button onClick={() => setMasterViewMode('current')} className={`px-4 py-2 rounded-2xl font-black ${masterViewMode === 'current' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>當月明細</button>
-                    <button onClick={() => setMasterViewMode('cumulative')} className={`px-4 py-2 rounded-2xl font-black ${masterViewMode === 'cumulative' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'}`}>累積明細</button>
-                  </div>
-                  <div className="flex flex-wrap gap-3 items-center">
-                    <span className="text-sm font-bold text-slate-400">雲端月份：{detailMonths.length} 個</span>
-                    {masterViewMode === 'current' && (
-                      <select value={masterSelectedMonth || ''} onChange={(e) => setMasterSelectedMonth(e.target.value)} className="border border-slate-300 rounded-xl px-4 py-2 font-bold text-slate-600 bg-white">
-                        {!masterSelectedMonth && <option value="" disabled>請選擇月份...</option>}
-                        {detailMonths.map(month => <option key={month} value={month}>{month}</option>)}
-                      </select>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mb-4 text-sm font-bold text-slate-500">
-                  {masterViewMode === 'current'
-                    ? `目前顯示：${masterSelectedMonth || '尚未選擇月份'}（${displayedMasterRows.length} 筆）`
-                    : `目前顯示：累積明細（共 ${displayedMasterRows.length} 筆）`}
-                </div>
-
-                <div className="overflow-x-auto max-h-[800px] custom-scrollbar rounded-3xl border">
-                  <table className="w-full text-left text-[11px] border-collapse font-bold">
-                    <thead className="bg-slate-900 text-white sticky top-0 z-20 shadow-lg font-black uppercase">
-                      <tr>
-                        {masterViewMode === 'cumulative' && <th className="px-4 py-5">來源月份</th>}
-                        <th className="px-6 py-5">客服名稱</th>
-                        <th className="px-4 py-5">班別</th>
-                        <th className="px-4 py-5">日期</th>
-                        <th className="px-4 py-5">時間</th>
-                        <th className="px-4 py-5">遊戲專線</th>
-                        <th className="px-4 py-5 text-center">Q1 滿意度</th>
-                        <th className="px-4 py-5 text-center">Q2 滿意度</th>
-                        <th className="px-4 py-5 text-center">通話秒數</th>
-                        <th className="px-8 py-5">對話 ID</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-medium">
-                      {displayedMasterRows.length === 0 ? (
-                        <tr>
-                          <td colSpan={masterViewMode === 'cumulative' ? 10 : 9} className="px-6 py-12 text-center text-slate-400 font-bold">目前沒有可顯示的明細資料</td>
-                        </tr>
-                      ) : (
-                        displayedMasterRows.map((d, i) => (
-                          <tr key={(d.id || 'row') + '-' + i} className={`group ${getEvenRowClass(i)} hover:bg-sky-100`}>
-                            {masterViewMode === 'cumulative' && <td className="px-4 py-4 text-slate-500 font-mono">{d.sourceMonth || '-'}</td>}
-                            <td className="px-6 py-4 text-slate-800 font-black">{d.agent}</td>
-                            <td className="px-4 py-4 text-slate-500">{d.shift}</td>
-                            <td className="px-4 py-4 text-slate-500 font-mono">{d.date}</td>
-                            <td className="px-4 py-4 text-slate-500 font-mono">{d.time}</td>
-                            <td className="px-4 py-4 text-slate-700">{d.line}</td>
-                            <td className="px-4 py-4 text-center">{d.q1}</td>
-                            <td className="px-4 py-4 text-center">{d.q2}</td>
-                            <td className="px-4 py-4 text-center font-mono">{Number(d.duration || 0)}</td>
-                            <td className="px-8 py-4 font-mono text-[10px] text-slate-400 id-column group-hover:text-blue-600 transition-colors">{d.id}</td>
-                          </tr>
-                        ))
-                      )}
+                      ))}
                     </tbody>
                   </table>
                 </div>
               </div>
-            )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "cloud" && (
+          <div className="bg-white rounded-[40px] shadow-sm border p-8 space-y-6">
+            <div className="flex flex-wrap gap-4 items-center justify-between">
+              <h3 className="text-xl font-black text-slate-800 underline decoration-blue-500 decoration-4 underline-offset-8">雲端已存資料</h3>
+            </div>
+
+            <div className="bg-slate-50 rounded-3xl border p-5 space-y-4">
+              <div className="font-black text-slate-700">整月快速整合</div>
+              <div className="flex gap-3 flex-wrap items-center">
+                <select value={cloudLoadMonth} onChange={(e)=>setCloudLoadMonth(e.target.value)} className="border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-700 bg-white min-w-[180px]">
+                  <option value="">請選擇月份</option>
+                  {allMonths.map(month => <option key={month} value={month}>{month}</option>)}
+                </select>
+                <button onClick={()=>loadMonthFromCloud(cloudLoadMonth, false)} className="bg-blue-600 text-white px-4 py-3 rounded-2xl font-bold hover:bg-blue-700">載入整月到預覽</button>
+                <button onClick={()=>loadMonthFromCloud(cloudLoadMonth, true)} className="bg-emerald-600 text-white px-4 py-3 rounded-2xl font-bold hover:bg-emerald-700">整月累積到目前預覽</button>
+              </div>
+              <div className="text-xs text-slate-400 font-bold">這裡會自動抓該月份全部週資料，並在預覽區即時重算三表。</div>
+            </div>
+
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={()=>loadSelectedCloudReports(false)} className="bg-blue-600 text-white px-4 py-2 rounded-2xl font-bold hover:bg-blue-700">載入勾選資料到預覽</button>
+              <button onClick={()=>loadSelectedCloudReports(true)} className="bg-emerald-600 text-white px-4 py-2 rounded-2xl font-bold hover:bg-emerald-700">勾選資料累積到預覽</button>
+              <button onClick={() => loadCloudBundle({ autoPreview: false })} className="bg-slate-600 text-white px-4 py-2 rounded-2xl font-bold hover:bg-slate-700">重新整理</button>
+            </div>
+
+            <div className="overflow-x-auto custom-scrollbar rounded-3xl border">
+              <table className="w-full text-center text-sm whitespace-nowrap">
+                <thead className="bg-slate-900 text-white font-black">
+                  <tr><th className="px-4 py-4">選取</th><th className="px-4 py-4">檔名</th><th className="px-4 py-4">有效筆數</th><th className="px-4 py-4">客服人數</th><th className="px-4 py-4">週次</th><th className="px-4 py-4">月份</th><th className="px-4 py-4">建立人</th><th className="px-4 py-4">重複</th><th className="px-4 py-4">實際新增</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
+                  {cloudIndex.length === 0 ? <tr><td colSpan="9" className="px-6 py-12 text-slate-400">目前沒有雲端資料</td></tr> : cloudIndex.map((item, i) => (
+                    <tr key={item.id} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
+                      <td className="px-4 py-4"><input type="checkbox" checked={selectedCloudItems.includes(item.id)} onChange={()=>toggleCloudItem(item.id)} /></td>
+                      <td className="px-4 py-4 text-left">{item.fileName || "-"}</td>
+                      <td className="px-4 py-4">{item.validCount || 0}</td>
+                      <td className="px-4 py-4">{item.agentCount || 0}</td>
+                      <td className="px-4 py-4">{(item.weekKeys || []).map(w => formatWeekKeyZh(w)).join("、") || "-"}</td>
+                      <td className="px-4 py-4">{(item.monthKeys || []).join("、") || "-"}</td>
+                      <td className="px-4 py-4">{item.createdBy || "-"}</td>
+                      <td className="px-4 py-4">{item.duplicateCountWithCloud || 0}</td>
+                      <td className="px-4 py-4">{item.insertedCount || 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "history" && (
+          <div className="bg-white rounded-[40px] shadow-sm border p-8 space-y-6">
+            <div className="flex flex-wrap gap-4 items-center justify-between">
+              <h3 className="text-xl font-black text-slate-800 underline decoration-blue-500 decoration-4 underline-offset-8">長期歷史總覽（雲端主資料）</h3>
+              <div className="flex gap-2 flex-wrap">
+                <button onClick={()=>setViewType("years")} className={`px-4 py-2 rounded-2xl font-black ${viewType==="years" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>年</button>
+                <button onClick={()=>setViewType("months")} className={`px-4 py-2 rounded-2xl font-black ${viewType==="months" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>月</button>
+                <button onClick={()=>setViewType("weeks")} className={`px-4 py-2 rounded-2xl font-black ${viewType==="weeks" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>周</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="bg-slate-50 rounded-3xl p-5 border"><div className="flex items-center justify-between mb-3"><div className="font-black text-slate-700">年份</div><div className="flex gap-2"><button onClick={()=>setSelectedYears([...allYears])} className="text-xs bg-white border rounded-lg px-2 py-1 font-black text-slate-600">全選</button><button onClick={()=>setSelectedYears([])} className="text-xs bg-white border rounded-lg px-2 py-1 font-black text-slate-600">清空</button></div></div><div className="space-y-2 max-h-52 overflow-y-auto custom-scrollbar">{allYears.map(year => <label key={year} className="flex items-center gap-2 text-sm font-bold text-slate-600"><input type="checkbox" checked={selectedYears.includes(year)} onChange={()=>setSelectedYears(prev=>prev.includes(year)?prev.filter(x=>x!==year):[...prev,year])} />{year}</label>)}</div></div>
+              <div className="bg-slate-50 rounded-3xl p-5 border"><div className="flex items-center justify-between mb-3"><div className="font-black text-slate-700">月份</div><div className="flex gap-2"><button onClick={()=>setSelectedMonths([...availableHistoryMonths])} className="text-xs bg-white border rounded-lg px-2 py-1 font-black text-slate-600">全選</button><button onClick={()=>setSelectedMonths([...availableHistoryMonths])} className="text-xs bg-white border rounded-lg px-2 py-1 font-black text-slate-600">依年份全選</button><button onClick={()=>setSelectedMonths([])} className="text-xs bg-white border rounded-lg px-2 py-1 font-black text-slate-600">清空</button></div></div><div className="space-y-2 max-h-52 overflow-y-auto custom-scrollbar">{availableHistoryMonths.map(month => <label key={month} className="flex items-center gap-2 text-sm font-bold text-slate-600"><input type="checkbox" checked={selectedMonths.includes(month)} onChange={()=>setSelectedMonths(prev=>prev.includes(month)?prev.filter(x=>x!==month):[...prev,month])} />{formatMonthDisplay(month)}</label>)}</div></div>
+              <div className="bg-slate-50 rounded-3xl p-5 border"><div className="flex items-center justify-between mb-3"><div className="font-black text-slate-700">週次</div><div className="flex gap-2"><button onClick={()=>setSelectedWeeks([...availableHistoryWeeks])} className="text-xs bg-white border rounded-lg px-2 py-1 font-black text-slate-600">全選</button><button onClick={()=>setSelectedWeeks([...availableHistoryWeeks])} className="text-xs bg-white border rounded-lg px-2 py-1 font-black text-slate-600">依月份全選</button><button onClick={()=>setSelectedWeeks([])} className="text-xs bg-white border rounded-lg px-2 py-1 font-black text-slate-600">清空</button></div></div><div className="space-y-2 max-h-52 overflow-y-auto custom-scrollbar">{availableHistoryWeeks.map(week => <label key={week} className="flex items-center gap-2 text-sm font-bold text-slate-600"><input type="checkbox" checked={selectedWeeks.includes(week)} onChange={()=>setSelectedWeeks(prev=>prev.includes(week)?prev.filter(x=>x!==week):[...prev,week])} />{formatWeekKeyZh(week)}</label>)}</div></div>
+            </div>
+            <div className="overflow-x-auto custom-scrollbar rounded-3xl border">
+              <table className="w-full text-center text-sm whitespace-nowrap">
+                <thead className="bg-slate-900 text-white font-black"><tr><th className="px-6 py-4">期間</th><th className="px-6 py-4">顯示標籤</th><th className="px-6 py-4">總通話數</th><th className="px-6 py-4">整體滿意度平均</th><th className="px-6 py-4">整體調查率平均</th><th className="px-6 py-4">GT+儲值專線</th><th className="px-6 py-4">滿貫專線</th><th className="px-6 py-4">金好運專線</th></tr></thead>
+                <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
+                  {periodList.length === 0 ? <tr><td colSpan="8" className="px-6 py-12 text-slate-400">目前沒有符合篩選條件的雲端資料</td></tr> : periodList.map((item, i) => (
+                    <tr key={item.periodKey} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
+                      <td className="px-6 py-4 font-black text-blue-700">{formatPeriodKeyForDisplay(item)}</td><td className="px-6 py-4">{viewType === "weeks" ? formatWeekDisplay(item.periodKey, item.periodLabel) : item.periodLabel}</td><td className="px-6 py-4 font-mono">{item.teamTotalCalls}</td><td className="px-6 py-4 font-mono">{formatPercent(item.overallSatAvg)}</td><td className="px-6 py-4 font-mono">{formatPercent(item.overallSurAvg)}</td><td className="px-6 py-4 font-mono">{formatToHours(item.teamLineTime["GT+儲值專線"])}</td><td className="px-6 py-4 font-mono">{formatToHours(item.teamLineTime["滿貫專線"])}</td><td className="px-6 py-4 font-mono">{formatToHours(item.teamLineTime["金好運專線"])}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "trend" && (
+          <div className="bg-white rounded-[40px] shadow-sm border p-8 space-y-6">
+            <div className="flex flex-wrap gap-4 items-center justify-between">
+              <h3 className="text-xl font-black text-slate-800 underline decoration-purple-500 decoration-4 underline-offset-8">趨勢分析（雲端主資料）</h3>
+              <div className="flex gap-2 flex-wrap">
+                <button onClick={()=>setViewType("years")} className={`px-4 py-2 rounded-2xl font-black ${viewType==="years" ? "bg-purple-600 text-white" : "bg-slate-100 text-slate-600"}`}>年</button>
+                <button onClick={()=>setViewType("months")} className={`px-4 py-2 rounded-2xl font-black ${viewType==="months" ? "bg-purple-600 text-white" : "bg-slate-100 text-slate-600"}`}>月</button>
+                <button onClick={()=>setViewType("weeks")} className={`px-4 py-2 rounded-2xl font-black ${viewType==="weeks" ? "bg-purple-600 text-white" : "bg-slate-100 text-slate-600"}`}>周</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+              <div className="bg-slate-50 rounded-3xl p-5 border"><div className="font-black text-slate-700 mb-3">比對模式</div><div className="flex gap-2"><button onClick={()=>setTrendCompareMode("single")} className={`px-4 py-2 rounded-2xl font-black ${trendCompareMode==="single" ? "bg-purple-600 text-white" : "bg-white text-slate-600 border"}`}>單人</button><button onClick={()=>setTrendCompareMode("multi")} className={`px-4 py-2 rounded-2xl font-black ${trendCompareMode==="multi" ? "bg-purple-600 text-white" : "bg-white text-slate-600 border"}`}>多人</button></div></div>
+              <div className="bg-slate-50 rounded-3xl p-5 border"><div className="font-black text-slate-700 mb-3">客服人員</div>{trendCompareMode === "single" ? <select value={selectedAgent} onChange={(e)=>setSelectedAgent(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-600 bg-white">{availableAgents.map(agent => <option key={agent} value={agent}>{agent}</option>)}</select> : <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">{availableAgents.map(agent => <label key={agent} className="flex items-center gap-2 text-sm font-bold text-slate-600"><input type="checkbox" checked={selectedTrendAgents.includes(agent)} onChange={()=>setSelectedTrendAgents(prev=>prev.includes(agent)?prev.filter(x=>x!==agent):[...prev,agent])} />{agent}</label>)}</div>}</div>
+              <div className="bg-slate-50 rounded-3xl p-5 border"><div className="font-black text-slate-700 mb-3">觀察指標</div><select value={selectedMetric} onChange={(e)=>setSelectedMetric(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-600 bg-white">{HISTORY_METRICS.map(metric => <option key={metric.key} value={metric.key}>{metric.label}</option>)}</select></div>
+              <div className="bg-slate-50 rounded-3xl p-5 border"><div className="font-black text-slate-700 mb-3">目前模式</div><div className="text-2xl font-black text-purple-700">{viewType==="years" ? "年度趨勢" : viewType==="months" ? "月度趨勢" : "週趨勢"}</div><div className="text-xs text-slate-400 font-bold mt-2">目前比對：{trendAgents.length ? trendAgents.join("、") : "尚未選擇"}</div></div>
+            </div>
+            <div className="bg-slate-50 rounded-[28px] border p-6">{trendData && trendData.labels.length > 0 ? <HistoryChart type={trendData.labels.length <= 1 ? "bar" : "line"} labels={trendData.labels} datasets={trendData.datasets} title={`${trendCompareMode === "multi" ? "多人" : (selectedAgent || "單人")}｜${selectedMetricConfig.label}`} /> : <div className="text-center py-16 text-slate-400 font-bold">目前沒有可顯示的雲端趨勢資料</div>}</div>
+            <div className="overflow-x-auto custom-scrollbar rounded-3xl border">
+              <table className="w-full text-center text-sm whitespace-nowrap">
+                <thead className="bg-slate-900 text-white font-black"><tr><th className="px-6 py-4">客服名稱</th><th className="px-4 py-4">班別</th>{periodList.map(item => <th key={item.periodKey} className="px-6 py-4">{formatPeriodKeyForDisplay(item)}</th>)}</tr></thead>
+                <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
+                  {summaryRows.map((row, i) => <tr key={row.name} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}><td className="px-6 py-4 text-left font-black">{row.name}</td><td className="px-4 py-4">{row.shift || "-"}</td>{periodList.map(item => <td key={item.periodKey} className="px-6 py-4 font-mono">{formatMetricValue(row[item.periodKey])}</td>)}</tr>)}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "detail" && (
+          <div className="bg-white rounded-[40px] shadow-sm border p-8 space-y-6">
+            <div className="flex flex-wrap gap-4 items-center justify-between">
+              <h3 className="text-xl font-black text-slate-800 underline decoration-blue-500 decoration-4 underline-offset-8">明細查詢（雲端主資料）</h3>
+              <div className="flex gap-2 flex-wrap items-center">
+                <button onClick={()=>setSelectedDetailMode("weeks")} className={`px-4 py-2 rounded-2xl font-black ${selectedDetailMode==="weeks" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>週</button>
+                <button onClick={()=>setSelectedDetailMode("months")} className={`px-4 py-2 rounded-2xl font-black ${selectedDetailMode==="months" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>月</button>
+                <button onClick={()=>setSelectedDetailMode("years")} className={`px-4 py-2 rounded-2xl font-black ${selectedDetailMode==="years" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>年</button>
+                {selectedDetailMode === "weeks" && <select value={selectedDetailWeek} onChange={(e)=>setSelectedDetailWeek(e.target.value)} className="border border-slate-300 rounded-xl px-4 py-2 font-bold text-slate-600 bg-white"><option value="">請選擇週次</option>{allWeeks.map(week => <option key={week} value={week}>{formatWeekDisplay(week, cloudMasterStore.weeks?.[week]?.periodLabel || "")}</option>)}</select>}
+                {selectedDetailMode === "months" && <select value={selectedDetailMonth} onChange={(e)=>setSelectedDetailMonth(e.target.value)} className="border border-slate-300 rounded-xl px-4 py-2 font-bold text-slate-600 bg-white"><option value="">請選擇月份</option>{allMonths.map(month => <option key={month} value={month}>{formatMonthDisplay(month)}</option>)}</select>}
+                {selectedDetailMode === "years" && <select value={selectedDetailYear} onChange={(e)=>setSelectedDetailYear(e.target.value)} className="border border-slate-300 rounded-xl px-4 py-2 font-bold text-slate-600 bg-white"><option value="">請選擇年份</option>{allYears.map(year => <option key={year} value={year}>{formatYearDisplay(year)}</option>)}</select>}
+                <button onClick={exportDetailExcel} className="bg-emerald-600 text-white px-4 py-2 rounded-2xl font-bold hover:bg-emerald-700 flex items-center gap-2"><Icon name="download" size={16} />匯出明細</button>
+              </div>
+            </div>
+            <div className="text-sm font-bold text-slate-500">目前顯示：{detailTitle}，共 {detailRows.length} 筆</div>
+            <div className="overflow-x-auto max-h-[760px] custom-scrollbar rounded-3xl border">
+              <table className="w-full text-left text-[11px] border-collapse font-bold">
+                <thead className="bg-slate-900 text-white sticky top-0 z-20 shadow-lg font-black uppercase"><tr><th className="px-6 py-5">客服名稱</th><th className="px-4 py-5">班別</th><th className="px-4 py-5">班別來源</th><th className="px-4 py-5">日期</th><th className="px-4 py-5">時間</th><th className="px-4 py-5">遊戲專線</th><th className="px-4 py-5">滿意度問題1</th><th className="px-4 py-5">滿意度問題2</th><th className="px-4 py-5">對話ID</th></tr></thead>
+                <tbody className="divide-y divide-slate-100 font-medium">
+                  {detailRows.length === 0 ? <tr><td colSpan="9" className="px-6 py-12 text-center text-slate-400 font-bold">目前沒有雲端明細資料</td></tr> : detailRows.map((d, i) => <tr key={`${d.id}-${i}`} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}><td className="px-6 py-4 font-black">{d.agent}</td><td className="px-4 py-4">{d.shift || "-"}</td><td className="px-4 py-4">{d.shiftSource || "-"}</td><td className="px-4 py-4">{formatCustomDate(d.date)}</td><td className="px-4 py-4">{d.time}</td><td className="px-4 py-4">{d.line}</td><td className="px-4 py-4">{d.q1}</td><td className="px-4 py-4">{d.q2}</td><td className="px-4 py-4">{d.id}</td></tr>)}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
@@ -1687,7 +1833,7 @@ function App() {
   );
 }
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
+const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<App />);
 </script>
 </body>
