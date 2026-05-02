@@ -80,21 +80,12 @@ const EMPTY_PREVIEW_META = {
 
 const SUMMARY_HEADERS = ["客服名稱", "班別", "GT專線", "儲值專線", "GT+儲值專線", "滿貫專線", "金好運專線", "總計"];
 const HISTORY_METRICS = [
+  { label: "整體非常滿意度平均", key: "overallVerySatAvg", format: "percent" },
   { label: "整體調查率平均", key: "overallSurAvg", format: "percent" },
-  { label: "整體未回答率平均", key: "overallUnansweredAvg", format: "percent" },
-  { label: "整體非常滿意率", key: "overallVerySatAvg", format: "percent" },
-  { label: "整體尚可率", key: "overallOkAvg", format: "percent" },
-  { label: "整體非常不滿意率", key: "overallVeryUnsatAvg", format: "percent" },
+  { label: "人員非常滿意度(Q1)", key: "q1VerySatRate", format: "percent" },
   { label: "人員調查率(Q1)", key: "q1SurRate", format: "percent" },
-  { label: "Q1未回答率", key: "q1UnansweredRate", format: "percent" },
-  { label: "Q1非常滿意率", key: "q1VerySatRate", format: "percent" },
-  { label: "Q1尚可率", key: "q1OkRate", format: "percent" },
-  { label: "Q1非常不滿意率", key: "q1VeryUnsatRate", format: "percent" },
+  { label: "問題非常滿意度(Q2)", key: "q2VerySatRate", format: "percent" },
   { label: "問題調查率(Q2)", key: "q2SurRate", format: "percent" },
-  { label: "Q2未回答率", key: "q2UnansweredRate", format: "percent" },
-  { label: "Q2非常滿意率", key: "q2VerySatRate", format: "percent" },
-  { label: "Q2尚可率", key: "q2OkRate", format: "percent" },
-  { label: "Q2非常不滿意率", key: "q2VeryUnsatRate", format: "percent" },
   { label: "總通話數", key: "totalCalls", format: "number" },
   { label: "GT時數", key: "GT專線", source: "lines", format: "hours" },
   { label: "儲值專線時數", key: "儲值專線", source: "lines", format: "hours" },
@@ -391,8 +382,8 @@ const convertDetailRowsToRows = (detailRows = []) => detailRows.map(row => {
     weekStart: weekInfo?.monday || "",
     weekEnd: weekInfo?.sunday || "",
     line: row["遊戲專線"] || "",
-    q1: row["滿意度問題1"] || "未回答",
-    q2: row["滿意度問題2"] || "未回答",
+    q1: normalizeSurveyAnswer(row["滿意度問題1"]),
+    q2: normalizeSurveyAnswer(row["滿意度問題2"]),
     id: row["對話ID"] || "",
     handleDuration,
     speakDuration,
@@ -454,6 +445,9 @@ const buildSatisfactionAnalysisRows = (rows = []) => {
         "客服名稱": agent,
         "班別": row.shift || "",
         "總通話數": 0,
+        "人員非常滿意度(Q1)": 0,
+        "問題非常滿意度(Q2)": 0,
+        "整體非常滿意度平均": 0,
         "Q1非常滿意": 0,
         "Q1尚可": 0,
         "Q1非常不滿意": 0,
@@ -500,8 +494,13 @@ const buildSatisfactionAnalysisRows = (rows = []) => {
     const q2VerySatRate = q2Answered ? row["Q2非常滿意"] / q2Answered : 0;
     const q2OkRate = q2Answered ? row["Q2尚可"] / q2Answered : 0;
     const q2VeryUnsatRate = q2Answered ? row["Q2非常不滿意"] / q2Answered : 0;
+    const q1SatRate = q1VerySatRate + q1OkRate;
+    const q2SatRate = q2VerySatRate + q2OkRate;
     return {
       ...row,
+      "人員非常滿意度(Q1)": q1VerySatRate,
+      "問題非常滿意度(Q2)": q2VerySatRate,
+      "整體非常滿意度平均": (q1VerySatRate + q2VerySatRate) / 2,
       "人員調查率(Q1)": q1Sur,
       "Q1未回答率": q1UnansweredRate,
       "Q1非常滿意率": q1VerySatRate,
@@ -537,21 +536,12 @@ const buildRankingRows = (analysisRows = []) => {
     });
   };
   return {
+    q1Sat: rankMetric("人員非常滿意度(Q1)"),
     q1Sur: rankMetric("人員調查率(Q1)"),
-    q1Unanswered: rankMetric("Q1未回答率"),
-    q1VerySat: rankMetric("Q1非常滿意率"),
-    q1Ok: rankMetric("Q1尚可率"),
-    q1VeryUnsat: rankMetric("Q1非常不滿意率"),
+    q2Sat: rankMetric("問題非常滿意度(Q2)"),
     q2Sur: rankMetric("問題調查率(Q2)"),
-    q2Unanswered: rankMetric("Q2未回答率"),
-    q2VerySat: rankMetric("Q2非常滿意率"),
-    q2Ok: rankMetric("Q2尚可率"),
-    q2VeryUnsat: rankMetric("Q2非常不滿意率"),
-    overallSur: rankMetric("整體調查率平均"),
-    overallUnanswered: rankMetric("整體未回答率平均"),
-    overallVerySat: rankMetric("整體非常滿意率"),
-    overallOk: rankMetric("整體尚可率"),
-    overallVeryUnsat: rankMetric("整體非常不滿意率")
+    overallSat: rankMetric("整體非常滿意度平均"),
+    overallSur: rankMetric("整體調查率平均")
   };
 };
 
@@ -567,8 +557,8 @@ const makeCsvResultFromPreviewRows = (rows = [], rawCount = 0) => {
       "來電日期": r.date || "",
       "來電時間": r.time || "",
       "遊戲專線": r.line || "",
-      "滿意度問題1": r.q1 || "未回答",
-      "滿意度問題2": r.q2 || "未回答",
+      "滿意度問題1": normalizeSurveyAnswer(r.q1),
+      "滿意度問題2": normalizeSurveyAnswer(r.q2),
       "對話ID": r.id || "",
       "總處理秒數": Number(r.handleDuration || 0),
       "總發話秒數": Number(r.speakDuration || 0)
@@ -632,8 +622,8 @@ const normalizeStoredRow = (row = {}) => {
     weekStart: info?.monday || row.weekStart || "",
     weekEnd: info?.sunday || row.weekEnd || "",
     line: row.line || row["遊戲專線"] || "",
-    q1: row.q1 || row["滿意度問題1"] || "未回答",
-    q2: row.q2 || row["滿意度問題2"] || "未回答",
+    q1: normalizeSurveyAnswer(row.q1 || row["滿意度問題1"]),
+    q2: normalizeSurveyAnswer(row.q2 || row["滿意度問題2"]),
     id: row.id || row["對話ID"] || "",
     handleDuration,
     speakDuration,
@@ -680,7 +670,7 @@ function App() {
   const [shiftEditorMonth, setShiftEditorMonth] = useState("default");
   const [shiftDraft, setShiftDraft] = useState({ "早班": "", "中班": "", "晚班": "" });
   const [viewType, setViewType] = useState("weeks");
-  const [selectedMetric, setSelectedMetric] = useState("overallSatAvg");
+  const [selectedMetric, setSelectedMetric] = useState("overallVerySatAvg");
   const [selectedAgent, setSelectedAgent] = useState("");
   const [selectedYears, setSelectedYears] = useState([]);
   const [selectedMonths, setSelectedMonths] = useState([]);
@@ -822,7 +812,7 @@ function App() {
         ...a,
         q1SatRate, q1SurRate, q1UnansweredRate, q1VerySatRate, q1OkRate, q1VeryUnsatRate,
         q2SatRate, q2SurRate, q2UnansweredRate, q2VerySatRate, q2OkRate, q2VeryUnsatRate,
-        overallSatAvg: (q1SatRate + q2SatRate) / 2,
+        overallSatAvg: (q1VerySatRate + q2VerySatRate) / 2,
         overallVerySatAvg: (q1VerySatRate + q2VerySatRate) / 2,
         overallOkAvg: (q1OkRate + q2OkRate) / 2,
         overallVeryUnsatAvg: (q1VeryUnsatRate + q2VeryUnsatRate) / 2,
@@ -1089,8 +1079,8 @@ function App() {
       weekStart: weekInfo?.monday || "",
       weekEnd: weekInfo?.sunday || "",
       line: row["遊戲專線"],
-      q1: row["滿意度問題1"],
-      q2: row["滿意度問題2"],
+      q1: normalizeSurveyAnswer(row["滿意度問題1"]),
+      q2: normalizeSurveyAnswer(row["滿意度問題2"]),
       id: row["對話ID"],
       handleDuration,
       speakDuration,
@@ -1639,7 +1629,7 @@ function App() {
       const headerFont = { color: { argb: "FFFFFFFF" }, bold: true };
       const isPercentHeader = (header = "") => {
         const h = String(header || "");
-        return h.includes("率") || h.includes("滿意度平均") || h.includes("調查率平均") || h.includes("問題滿意度") || h.includes("人員滿意度");
+        return h.includes("率") || h.includes("滿意度平均") || h.includes("調查率平均") || h.includes("非常滿意度") || h.includes("問題滿意度") || h.includes("人員滿意度");
       };
 
       const createFormattedSheet = (sheetName, headers, dataRows) => {
@@ -1686,21 +1676,12 @@ function App() {
 
       const rankSheet = workbook.addWorksheet("滿意度排名");
       const rankGroups = [
+        ["人員非常滿意度(Q1)", ranking.q1Sat],
         ["人員調查率(Q1)", ranking.q1Sur],
-        ["Q1未回答率", ranking.q1Unanswered],
-        ["Q1非常滿意率", ranking.q1VerySat],
-        ["Q1尚可率", ranking.q1Ok],
-        ["Q1非常不滿意率", ranking.q1VeryUnsat],
+        ["問題非常滿意度(Q2)", ranking.q2Sat],
         ["問題調查率(Q2)", ranking.q2Sur],
-        ["Q2未回答率", ranking.q2Unanswered],
-        ["Q2非常滿意率", ranking.q2VerySat],
-        ["Q2尚可率", ranking.q2Ok],
-        ["Q2非常不滿意率", ranking.q2VeryUnsat],
-        ["整體調查率平均", ranking.overallSur],
-        ["整體未回答率平均", ranking.overallUnanswered],
-        ["整體非常滿意率", ranking.overallVerySat],
-        ["整體尚可率", ranking.overallOk],
-        ["整體非常不滿意率", ranking.overallVeryUnsat]
+        ["整體非常滿意度平均", ranking.overallSat],
+        ["整體調查率平均", ranking.overallSur]
       ];
       rankSheet.addRow(rankGroups.flatMap(([title]) => [title, "", ""]));
       rankSheet.addRow(rankGroups.flatMap(() => ["排名", "客服名稱", "數值"]));
@@ -1782,7 +1763,7 @@ function App() {
               <Icon name="cloud" size={30} className="text-blue-600" />
               客服電話紀錄長期觀察系統（雲端主版｜週整合版）
             </h1>
-            <p className="text-slate-400 font-bold mt-2">已加入：整月一鍵載入、多週合併預覽、整合來源顯示、預覽三表即時重算</p>
+            <p className="text-slate-400 font-bold mt-2">已加入：整月一鍵載入、多週合併預覽、滿意度清洗（非非常滿意/尚可/非常不滿意皆為未回答）</p>
           </div>
           <div className="flex gap-3 flex-wrap items-center justify-end">
             <span className="text-sm font-bold text-slate-400">{syncStatus}</span>
@@ -2028,7 +2009,7 @@ function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                      {previewAnalysisRows.length === 0 ? <tr><td colSpan="17" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewAnalysisRows.map((r, i) => (
+                      {previewAnalysisRows.length === 0 ? <tr><td colSpan="24" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewAnalysisRows.map((r, i) => (
                         <tr key={i} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
                           <td className="px-4 py-4">{r["客服名稱"]}</td><td className="px-4 py-4">{r["班別"] || "-"}</td><td className="px-4 py-4">{r["總通話數"]}</td>
                           <td className="px-4 py-4">{r["Q1非常滿意"]}</td><td className="px-4 py-4">{r["Q1尚可"]}</td><td className="px-4 py-4">{r["Q1非常不滿意"]}</td>
@@ -2047,21 +2028,12 @@ function App() {
                 <div className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2"><Icon name="trophy" size={20} className="text-rose-500"/>五、滿意度排名</div>
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                   {[
+                    ["人員非常滿意度(Q1)", previewRanking.q1Sat],
                     ["人員調查率(Q1)", previewRanking.q1Sur],
-                    ["Q1未回答率", previewRanking.q1Unanswered],
-                    ["Q1非常滿意率", previewRanking.q1VerySat],
-                    ["Q1尚可率", previewRanking.q1Ok],
-                    ["Q1非常不滿意率", previewRanking.q1VeryUnsat],
+                    ["問題非常滿意度(Q2)", previewRanking.q2Sat],
                     ["問題調查率(Q2)", previewRanking.q2Sur],
-                    ["Q2未回答率", previewRanking.q2Unanswered],
-                    ["Q2非常滿意率", previewRanking.q2VerySat],
-                    ["Q2尚可率", previewRanking.q2Ok],
-                    ["Q2非常不滿意率", previewRanking.q2VeryUnsat],
-                    ["整體調查率平均", previewRanking.overallSur],
-                    ["整體未回答率平均", previewRanking.overallUnanswered],
-                    ["整體非常滿意率", previewRanking.overallVerySat],
-                    ["整體尚可率", previewRanking.overallOk],
-                    ["整體非常不滿意率", previewRanking.overallVeryUnsat]
+                    ["整體非常滿意度平均", previewRanking.overallSat],
+                    ["整體調查率平均", previewRanking.overallSur]
                   ].map(([title, rows], idx) => (
                     <div key={idx} className="overflow-x-auto custom-scrollbar rounded-3xl border">
                       <table className="w-full text-center text-sm whitespace-nowrap">
@@ -2174,7 +2146,31 @@ function App() {
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
               <div className="bg-slate-50 rounded-3xl p-5 border"><div className="font-black text-slate-700 mb-3">比對模式</div><div className="flex gap-2"><button onClick={()=>setTrendCompareMode("single")} className={`px-4 py-2 rounded-2xl font-black ${trendCompareMode==="single" ? "bg-purple-600 text-white" : "bg-white text-slate-600 border"}`}>單人</button><button onClick={()=>setTrendCompareMode("multi")} className={`px-4 py-2 rounded-2xl font-black ${trendCompareMode==="multi" ? "bg-purple-600 text-white" : "bg-white text-slate-600 border"}`}>多人</button></div></div>
-              <div className="bg-slate-50 rounded-3xl p-5 border"><div className="font-black text-slate-700 mb-3">客服人員</div>{trendCompareMode === "single" ? <select value={selectedAgent} onChange={(e)=>setSelectedAgent(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-600 bg-white">{availableAgents.map(agent => <option key={agent} value={agent}>{agent}</option>)}</select> : <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">{availableAgents.map(agent => <label key={agent} className="flex items-center gap-2 text-sm font-bold text-slate-600"><input type="checkbox" checked={selectedTrendAgents.includes(agent)} onChange={()=>setSelectedTrendAgents(prev=>prev.includes(agent)?prev.filter(x=>x!==agent):[...prev,agent])} />{agent}</label>)}</div>}</div>
+              <div className="bg-slate-50 rounded-3xl p-5 border">
+                <div className="font-black text-slate-700 mb-3">客服人員</div>
+                {trendCompareMode === "single" ? (
+                  <select value={selectedAgent} onChange={(e)=>setSelectedAgent(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-600 bg-white">
+                    {availableAgents.map(agent => <option key={agent} value={agent}>{agent}</option>)}
+                  </select>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="text-xs font-black text-slate-400">已選 {selectedTrendAgents.length} / {availableAgents.length} 人</div>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={()=>setSelectedTrendAgents([...availableAgents])} className="text-xs bg-purple-600 text-white rounded-lg px-3 py-1.5 font-black hover:bg-purple-700">全選</button>
+                        <button type="button" onClick={()=>setSelectedTrendAgents([])} className="text-xs bg-white border border-slate-300 text-slate-600 rounded-lg px-3 py-1.5 font-black hover:bg-slate-100">清空</button>
+                      </div>
+                    </div>
+                    <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
+                      {availableAgents.map(agent => (
+                        <label key={agent} className="flex items-center gap-2 text-sm font-bold text-slate-600">
+                          <input type="checkbox" checked={selectedTrendAgents.includes(agent)} onChange={()=>setSelectedTrendAgents(prev=>prev.includes(agent)?prev.filter(x=>x!==agent):[...prev,agent])} />{agent}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="bg-slate-50 rounded-3xl p-5 border"><div className="font-black text-slate-700 mb-3">觀察指標</div><select value={selectedMetric} onChange={(e)=>setSelectedMetric(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 font-bold text-slate-600 bg-white">{HISTORY_METRICS.map(metric => <option key={metric.key} value={metric.key}>{metric.label}</option>)}</select></div>
               <div className="bg-slate-50 rounded-3xl p-5 border"><div className="font-black text-slate-700 mb-3">目前模式</div><div className="text-2xl font-black text-purple-700">{viewType==="years" ? "年度趨勢" : viewType==="months" ? "月度趨勢" : "週趨勢"}</div><div className="text-xs text-slate-400 font-bold mt-2">目前比對：{trendAgents.length ? trendAgents.join("、") : "尚未選擇"}</div></div>
             </div>
