@@ -80,12 +80,21 @@ const EMPTY_PREVIEW_META = {
 
 const SUMMARY_HEADERS = ["客服名稱", "班別", "GT專線", "儲值專線", "GT+儲值專線", "滿貫專線", "金好運專線", "總計"];
 const HISTORY_METRICS = [
-  { label: "整體滿意度平均", key: "overallSatAvg", format: "percent" },
   { label: "整體調查率平均", key: "overallSurAvg", format: "percent" },
-  { label: "人員滿意度(Q1)", key: "q1SatRate", format: "percent" },
+  { label: "整體未回答率平均", key: "overallUnansweredAvg", format: "percent" },
+  { label: "整體非常滿意率", key: "overallVerySatAvg", format: "percent" },
+  { label: "整體尚可率", key: "overallOkAvg", format: "percent" },
+  { label: "整體非常不滿意率", key: "overallVeryUnsatAvg", format: "percent" },
   { label: "人員調查率(Q1)", key: "q1SurRate", format: "percent" },
-  { label: "問題滿意度(Q2)", key: "q2SatRate", format: "percent" },
+  { label: "Q1未回答率", key: "q1UnansweredRate", format: "percent" },
+  { label: "Q1非常滿意率", key: "q1VerySatRate", format: "percent" },
+  { label: "Q1尚可率", key: "q1OkRate", format: "percent" },
+  { label: "Q1非常不滿意率", key: "q1VeryUnsatRate", format: "percent" },
   { label: "問題調查率(Q2)", key: "q2SurRate", format: "percent" },
+  { label: "Q2未回答率", key: "q2UnansweredRate", format: "percent" },
+  { label: "Q2非常滿意率", key: "q2VerySatRate", format: "percent" },
+  { label: "Q2尚可率", key: "q2OkRate", format: "percent" },
+  { label: "Q2非常不滿意率", key: "q2VeryUnsatRate", format: "percent" },
   { label: "總通話數", key: "totalCalls", format: "number" },
   { label: "GT時數", key: "GT專線", source: "lines", format: "hours" },
   { label: "儲值專線時數", key: "儲值專線", source: "lines", format: "hours" },
@@ -311,7 +320,7 @@ const normalizeLineName = (value) => {
 
 const normalizeSurveyAnswer = (value) => {
   const t = String(value || "").trim();
-  return ["非常滿意", "尚可", "不滿意", "非常不滿意"].includes(t) ? t : "未回答";
+  return ["非常滿意", "尚可", "非常不滿意"].includes(t) ? t : "未回答";
 };
 
 const extractSatisfaction = (tagText) => {
@@ -448,15 +457,24 @@ const buildSatisfactionAnalysisRows = (rows = []) => {
         "Q1非常滿意": 0,
         "Q1尚可": 0,
         "Q1非常不滿意": 0,
-        "人員滿意度(Q1)": 0,
         "人員調查率(Q1)": 0,
+        "Q1未回答率": 0,
+        "Q1非常滿意率": 0,
+        "Q1尚可率": 0,
+        "Q1非常不滿意率": 0,
         "Q2非常滿意": 0,
         "Q2尚可": 0,
         "Q2非常不滿意": 0,
-        "問題滿意度(Q2)": 0,
         "問題調查率(Q2)": 0,
-        "整體滿意度平均": 0,
-        "整體調查率平均": 0
+        "Q2未回答率": 0,
+        "Q2非常滿意率": 0,
+        "Q2尚可率": 0,
+        "Q2非常不滿意率": 0,
+        "整體調查率平均": 0,
+        "整體未回答率平均": 0,
+        "整體非常滿意率": 0,
+        "整體尚可率": 0,
+        "整體非常不滿意率": 0
       });
     }
     const target = map.get(agent);
@@ -472,22 +490,36 @@ const buildSatisfactionAnalysisRows = (rows = []) => {
   return Array.from(map.values()).sort((a, b) => a["客服名稱"].localeCompare(b["客服名稱"], "zh-Hant")).map(row => {
     const q1Answered = row["Q1非常滿意"] + row["Q1尚可"] + row["Q1非常不滿意"];
     const q2Answered = row["Q2非常滿意"] + row["Q2尚可"] + row["Q2非常不滿意"];
-    const q1Sat = q1Answered ? (row["Q1非常滿意"] + row["Q1尚可"]) / q1Answered : 0;
     const q1Sur = row["總通話數"] ? q1Answered / row["總通話數"] : 0;
-    const q2Sat = q2Answered ? (row["Q2非常滿意"] + row["Q2尚可"]) / q2Answered : 0;
+    const q1UnansweredRate = row["總通話數"] ? (row["總通話數"] - q1Answered) / row["總通話數"] : 0;
     const q2Sur = row["總通話數"] ? q2Answered / row["總通話數"] : 0;
+    const q2UnansweredRate = row["總通話數"] ? (row["總通話數"] - q2Answered) / row["總通話數"] : 0;
+    const q1VerySatRate = q1Answered ? row["Q1非常滿意"] / q1Answered : 0;
+    const q1OkRate = q1Answered ? row["Q1尚可"] / q1Answered : 0;
+    const q1VeryUnsatRate = q1Answered ? row["Q1非常不滿意"] / q1Answered : 0;
+    const q2VerySatRate = q2Answered ? row["Q2非常滿意"] / q2Answered : 0;
+    const q2OkRate = q2Answered ? row["Q2尚可"] / q2Answered : 0;
+    const q2VeryUnsatRate = q2Answered ? row["Q2非常不滿意"] / q2Answered : 0;
     return {
       ...row,
-      "人員滿意度(Q1)": q1Sat,
       "人員調查率(Q1)": q1Sur,
-      "問題滿意度(Q2)": q2Sat,
+      "Q1未回答率": q1UnansweredRate,
+      "Q1非常滿意率": q1VerySatRate,
+      "Q1尚可率": q1OkRate,
+      "Q1非常不滿意率": q1VeryUnsatRate,
       "問題調查率(Q2)": q2Sur,
-      "整體滿意度平均": (q1Sat + q2Sat) / 2,
-      "整體調查率平均": (q1Sur + q2Sur) / 2
+      "Q2未回答率": q2UnansweredRate,
+      "Q2非常滿意率": q2VerySatRate,
+      "Q2尚可率": q2OkRate,
+      "Q2非常不滿意率": q2VeryUnsatRate,
+      "整體調查率平均": (q1Sur + q2Sur) / 2,
+      "整體未回答率平均": (q1UnansweredRate + q2UnansweredRate) / 2,
+      "整體非常滿意率": (q1VerySatRate + q2VerySatRate) / 2,
+      "整體尚可率": (q1OkRate + q2OkRate) / 2,
+      "整體非常不滿意率": (q1VeryUnsatRate + q2VeryUnsatRate) / 2
     };
   });
 };
-
 const buildRankingRows = (analysisRows = []) => {
   const rankMetric = (metricKey) => {
     const sorted = analysisRows
@@ -505,15 +537,23 @@ const buildRankingRows = (analysisRows = []) => {
     });
   };
   return {
-    q1Sat: rankMetric("人員滿意度(Q1)"),
     q1Sur: rankMetric("人員調查率(Q1)"),
-    q2Sat: rankMetric("問題滿意度(Q2)"),
+    q1Unanswered: rankMetric("Q1未回答率"),
+    q1VerySat: rankMetric("Q1非常滿意率"),
+    q1Ok: rankMetric("Q1尚可率"),
+    q1VeryUnsat: rankMetric("Q1非常不滿意率"),
     q2Sur: rankMetric("問題調查率(Q2)"),
-    overallSat: rankMetric("整體滿意度平均"),
-    overallSur: rankMetric("整體調查率平均")
+    q2Unanswered: rankMetric("Q2未回答率"),
+    q2VerySat: rankMetric("Q2非常滿意率"),
+    q2Ok: rankMetric("Q2尚可率"),
+    q2VeryUnsat: rankMetric("Q2非常不滿意率"),
+    overallSur: rankMetric("整體調查率平均"),
+    overallUnanswered: rankMetric("整體未回答率平均"),
+    overallVerySat: rankMetric("整體非常滿意率"),
+    overallOk: rankMetric("整體尚可率"),
+    overallVeryUnsat: rankMetric("整體非常不滿意率")
   };
 };
-
 
 const makeCsvResultFromPreviewRows = (rows = [], rawCount = 0) => {
   const summary = summarizePreviewRows(rows);
@@ -727,7 +767,7 @@ function App() {
     getAllAgentsFromShiftRules().forEach(name => {
       agentBase[name] = {
         name, shift: getShiftByMonth(name, periodMonthKey), totalCalls: 0,
-        q1Answered: 0, q1Satisfied: 0, q2Answered: 0, q2Satisfied: 0,
+        q1Answered: 0, q1Satisfied: 0, q1VerySatisfied: 0, q1Ok: 0, q1VeryUnsatisfied: 0, q2Answered: 0, q2Satisfied: 0, q2VerySatisfied: 0, q2Ok: 0, q2VeryUnsatisfied: 0,
         lines: { "GT專線": 0, "儲值專線": 0, "GT+儲值專線": 0, "滿貫專線": 0, "金好運專線": 0 }
       };
     });
@@ -737,15 +777,27 @@ function App() {
         agentBase[d.agent] = {
           name: d.agent,
           shift: d.shift || getShiftByMonth(d.agent, d.monthKey || periodMonthKey),
-          totalCalls: 0, q1Answered: 0, q1Satisfied: 0, q2Answered: 0, q2Satisfied: 0,
+          totalCalls: 0, q1Answered: 0, q1Satisfied: 0, q1VerySatisfied: 0, q1Ok: 0, q1VeryUnsatisfied: 0, q2Answered: 0, q2Satisfied: 0, q2VerySatisfied: 0, q2Ok: 0, q2VeryUnsatisfied: 0,
           lines: { "GT專線": 0, "儲值專線": 0, "GT+儲值專線": 0, "滿貫專線": 0, "金好運專線": 0 }
         };
       }
       const a = agentBase[d.agent];
       a.shift = d.shift || a.shift;
       a.totalCalls++;
-      if (["非常滿意", "尚可", "不滿意", "非常不滿意"].includes(d.q1)) { a.q1Answered++; if (["非常滿意", "尚可"].includes(d.q1)) a.q1Satisfied++; }
-      if (["非常滿意", "尚可", "不滿意", "非常不滿意"].includes(d.q2)) { a.q2Answered++; if (["非常滿意", "尚可"].includes(d.q2)) a.q2Satisfied++; }
+      if (["非常滿意", "尚可", "非常不滿意"].includes(d.q1)) {
+        a.q1Answered++;
+        if (["非常滿意", "尚可"].includes(d.q1)) a.q1Satisfied++;
+        if (d.q1 === "非常滿意") a.q1VerySatisfied++;
+        if (d.q1 === "尚可") a.q1Ok++;
+        if (d.q1 === "非常不滿意") a.q1VeryUnsatisfied++;
+      }
+      if (["非常滿意", "尚可", "非常不滿意"].includes(d.q2)) {
+        a.q2Answered++;
+        if (["非常滿意", "尚可"].includes(d.q2)) a.q2Satisfied++;
+        if (d.q2 === "非常滿意") a.q2VerySatisfied++;
+        if (d.q2 === "尚可") a.q2Ok++;
+        if (d.q2 === "非常不滿意") a.q2VeryUnsatisfied++;
+      }
       const lineDuration = Number(d.speakDuration || d.duration || 0);
       if ((d.line || "").includes("GT")) { a.lines["GT專線"] += lineDuration; a.lines["GT+儲值專線"] += lineDuration; }
       if ((d.line || "").includes("儲值")) { a.lines["儲值專線"] += lineDuration; a.lines["GT+儲值專線"] += lineDuration; }
@@ -755,10 +807,28 @@ function App() {
 
     return Object.values(agentBase).map(a => {
       const q1SatRate = a.q1Answered ? (a.q1Satisfied / a.q1Answered) * 100 : 0;
+      const q1VerySatRate = a.q1Answered ? (a.q1VerySatisfied / a.q1Answered) * 100 : 0;
+      const q1OkRate = a.q1Answered ? (a.q1Ok / a.q1Answered) * 100 : 0;
+      const q1VeryUnsatRate = a.q1Answered ? (a.q1VeryUnsatisfied / a.q1Answered) * 100 : 0;
       const q1SurRate = a.totalCalls ? (a.q1Answered / a.totalCalls) * 100 : 0;
+      const q1UnansweredRate = a.totalCalls ? ((a.totalCalls - a.q1Answered) / a.totalCalls) * 100 : 0;
       const q2SatRate = a.q2Answered ? (a.q2Satisfied / a.q2Answered) * 100 : 0;
+      const q2VerySatRate = a.q2Answered ? (a.q2VerySatisfied / a.q2Answered) * 100 : 0;
+      const q2OkRate = a.q2Answered ? (a.q2Ok / a.q2Answered) * 100 : 0;
+      const q2VeryUnsatRate = a.q2Answered ? (a.q2VeryUnsatisfied / a.q2Answered) * 100 : 0;
       const q2SurRate = a.totalCalls ? (a.q2Answered / a.totalCalls) * 100 : 0;
-      return { ...a, q1SatRate, q1SurRate, q2SatRate, q2SurRate, overallSatAvg: (q1SatRate + q2SatRate) / 2, overallSurAvg: (q1SurRate + q2SurRate) / 2 };
+      const q2UnansweredRate = a.totalCalls ? ((a.totalCalls - a.q2Answered) / a.totalCalls) * 100 : 0;
+      return {
+        ...a,
+        q1SatRate, q1SurRate, q1UnansweredRate, q1VerySatRate, q1OkRate, q1VeryUnsatRate,
+        q2SatRate, q2SurRate, q2UnansweredRate, q2VerySatRate, q2OkRate, q2VeryUnsatRate,
+        overallSatAvg: (q1SatRate + q2SatRate) / 2,
+        overallVerySatAvg: (q1VerySatRate + q2VerySatRate) / 2,
+        overallOkAvg: (q1OkRate + q2OkRate) / 2,
+        overallVeryUnsatAvg: (q1VeryUnsatRate + q2VeryUnsatRate) / 2,
+        overallSurAvg: (q1SurRate + q2SurRate) / 2,
+        overallUnansweredAvg: (q1UnansweredRate + q2UnansweredRate) / 2
+      };
     });
   }, [getAllAgentsFromShiftRules, getShiftByMonth]);
 
@@ -767,13 +837,28 @@ function App() {
     const analysisList = buildAgentStats(rows, periodMonthKey);
     const lineTotals = { "GT專線": 0, "儲值專線": 0, "GT+儲值專線": 0, "滿貫專線": 0, "金好運專線": 0 };
     analysisList.forEach(a => Object.keys(lineTotals).forEach(k => { lineTotals[k] += a.lines[k]; }));
-    let satTotal = 0, satCount = 0, surTotal = 0, surCount = 0, teamTotalCalls = 0;
+    let satTotal = 0, verySatTotal = 0, okTotal = 0, veryUnsatTotal = 0, satCount = 0, surTotal = 0, unansweredTotal = 0, surCount = 0, teamTotalCalls = 0;
     analysisList.forEach(a => {
       teamTotalCalls += a.totalCalls;
-      if (a.q1Answered > 0 || a.q2Answered > 0) { satTotal += a.overallSatAvg; satCount++; }
-      if (a.totalCalls > 0) { surTotal += a.overallSurAvg; surCount++; }
+      if (a.q1Answered > 0 || a.q2Answered > 0) {
+        satTotal += a.overallSatAvg;
+        verySatTotal += a.overallVerySatAvg;
+        okTotal += a.overallOkAvg;
+        veryUnsatTotal += a.overallVeryUnsatAvg;
+        satCount++;
+      }
+      if (a.totalCalls > 0) { surTotal += a.overallSurAvg; unansweredTotal += a.overallUnansweredAvg; surCount++; }
     });
-    return { periodKey, periodLabel, overallSatAvg: satCount ? satTotal / satCount : 0, overallSurAvg: surCount ? surTotal / surCount : 0, teamTotalCalls, teamLineTime: lineTotals, agents: analysisList, ...extra };
+    return {
+      periodKey, periodLabel,
+      overallSatAvg: satCount ? satTotal / satCount : 0,
+      overallVerySatAvg: satCount ? verySatTotal / satCount : 0,
+      overallOkAvg: satCount ? okTotal / satCount : 0,
+      overallVeryUnsatAvg: satCount ? veryUnsatTotal / satCount : 0,
+      overallSurAvg: surCount ? surTotal / surCount : 0,
+      overallUnansweredAvg: surCount ? unansweredTotal / surCount : 0,
+      teamTotalCalls, teamLineTime: lineTotals, agents: analysisList, ...extra
+    };
   }, [buildAgentStats]);
 
   const fetchRowsFromReportDoc = useCallback(async (itemOrDoc) => {
@@ -1552,6 +1637,11 @@ function App() {
       const lightBlueFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0F2FE" } };
       const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F172A" } };
       const headerFont = { color: { argb: "FFFFFFFF" }, bold: true };
+      const isPercentHeader = (header = "") => {
+        const h = String(header || "");
+        return h.includes("率") || h.includes("滿意度平均") || h.includes("調查率平均") || h.includes("問題滿意度") || h.includes("人員滿意度");
+      };
+
       const createFormattedSheet = (sheetName, headers, dataRows) => {
         const sheet = workbook.addWorksheet(sheetName);
         sheet.addRow(headers);
@@ -1560,7 +1650,13 @@ function App() {
         dataRows.forEach((rowData, index) => {
           const row = sheet.addRow(rowData);
           if (index % 2 === 1) row.eachCell(cell => { cell.fill = lightBlueFill; });
-          row.eachCell(cell => { cell.alignment = { horizontal: "center", vertical: "middle" }; });
+          row.eachCell((cell, colNumber) => {
+            cell.alignment = { horizontal: "center", vertical: "middle" };
+            if (isPercentHeader(headers[colNumber - 1])) cell.numFmt = "0.00%";
+          });
+        });
+        headers.forEach((header, index) => {
+          if (isPercentHeader(header)) sheet.getColumn(index + 1).numFmt = "0.00%";
         });
         sheet.columns.forEach(column => { column.width = 16; });
         return sheet;
@@ -1580,29 +1676,44 @@ function App() {
       const sheet3Data = summary.speakRows.map(r => SUMMARY_HEADERS.map(h => ["客服名稱", "班別"].includes(h) ? (r[h] || "-") : Number(formatToHours(r[h]))));
       createFormattedSheet("三、總發話時間", SUMMARY_HEADERS, sheet3Data);
 
-      const analysisHeaders = ["客服名稱", "班別", "總通話數", "Q1非常滿意", "Q1尚可", "Q1非常不滿意", "人員滿意度(Q1)", "人員調查率(Q1)", "Q2非常滿意", "Q2尚可", "Q2非常不滿意", "問題滿意度(Q2)", "問題調查率(Q2)", "整體滿意度平均", "整體調查率平均"];
+      const analysisHeaders = ["客服名稱", "班別", "總通話數", "Q1非常滿意", "Q1尚可", "Q1非常不滿意", "人員調查率(Q1)", "Q1未回答率", "Q1非常滿意率", "Q1尚可率", "Q1非常不滿意率", "Q2非常滿意", "Q2尚可", "Q2非常不滿意", "問題調查率(Q2)", "Q2未回答率", "Q2非常滿意率", "Q2尚可率", "Q2非常不滿意率", "整體調查率平均", "整體未回答率平均", "整體非常滿意率", "整體尚可率", "整體非常不滿意率"];
       const analysisData = analysisRows.map(r => analysisHeaders.map(h => {
         const value = r[h];
-        if (["人員滿意度(Q1)", "人員調查率(Q1)", "問題滿意度(Q2)", "問題調查率(Q2)", "整體滿意度平均", "整體調查率平均"].includes(h)) return Number((Number(value || 0) * 100).toFixed(2)) / 100;
+        if (["人員調查率(Q1)", "Q1未回答率", "Q1非常滿意率", "Q1尚可率", "Q1非常不滿意率", "問題調查率(Q2)", "Q2未回答率", "Q2非常滿意率", "Q2尚可率", "Q2非常不滿意率", "整體調查率平均", "整體未回答率平均", "整體非常滿意率", "整體尚可率", "整體非常不滿意率"].includes(h)) return Number((Number(value || 0) * 100).toFixed(2)) / 100;
         return value;
       }));
       createFormattedSheet("滿意度分析", analysisHeaders, analysisData);
 
       const rankSheet = workbook.addWorksheet("滿意度排名");
-      rankSheet.addRow(["人員滿意度(Q1)", "", "", "人員調查率(Q1)", "", "", "問題滿意度(Q2)", "", "", "問題調查率(Q2)", "", ""]);
-      rankSheet.addRow(["排名", "客服名稱", "數值", "排名", "客服名稱", "數值", "排名", "客服名稱", "數值", "排名", "客服名稱", "數值"]);
-      const maxLen = Math.max(ranking.q1Sat.length, ranking.q1Sur.length, ranking.q2Sat.length, ranking.q2Sur.length);
+      const rankGroups = [
+        ["人員調查率(Q1)", ranking.q1Sur],
+        ["Q1未回答率", ranking.q1Unanswered],
+        ["Q1非常滿意率", ranking.q1VerySat],
+        ["Q1尚可率", ranking.q1Ok],
+        ["Q1非常不滿意率", ranking.q1VeryUnsat],
+        ["問題調查率(Q2)", ranking.q2Sur],
+        ["Q2未回答率", ranking.q2Unanswered],
+        ["Q2非常滿意率", ranking.q2VerySat],
+        ["Q2尚可率", ranking.q2Ok],
+        ["Q2非常不滿意率", ranking.q2VeryUnsat],
+        ["整體調查率平均", ranking.overallSur],
+        ["整體未回答率平均", ranking.overallUnanswered],
+        ["整體非常滿意率", ranking.overallVerySat],
+        ["整體尚可率", ranking.overallOk],
+        ["整體非常不滿意率", ranking.overallVeryUnsat]
+      ];
+      rankSheet.addRow(rankGroups.flatMap(([title]) => [title, "", ""]));
+      rankSheet.addRow(rankGroups.flatMap(() => ["排名", "客服名稱", "數值"]));
+      const maxLen = Math.max(...rankGroups.map(([, rows]) => rows.length));
       for (let i = 0; i < maxLen; i++) {
-        const a = ranking.q1Sat[i] || {};
-        const b = ranking.q1Sur[i] || {};
-        const c = ranking.q2Sat[i] || {};
-        const d = ranking.q2Sur[i] || {};
-        rankSheet.addRow([
-          a.排名 || "", a.客服名稱 || "", a.數值 != null ? Number((a.數值 * 100).toFixed(2)) / 100 : "",
-          b.排名 || "", b.客服名稱 || "", b.數值 != null ? Number((b.數值 * 100).toFixed(2)) / 100 : "",
-          c.排名 || "", c.客服名稱 || "", c.數值 != null ? Number((c.數值 * 100).toFixed(2)) / 100 : "",
-          d.排名 || "", d.客服名稱 || "", d.數值 != null ? Number((d.數值 * 100).toFixed(2)) / 100 : ""
-        ]);
+        rankSheet.addRow(rankGroups.flatMap(([, rows]) => {
+          const r = rows[i] || {};
+          return [
+            r.排名 || "",
+            r.客服名稱 || "",
+            r.數值 != null ? Number((r.數值 * 100).toFixed(2)) / 100 : ""
+          ];
+        }));
       }
       [1,2].forEach(rn => {
         const row = rankSheet.getRow(rn);
@@ -1612,6 +1723,9 @@ function App() {
         const row = rankSheet.getRow(r);
         if ((r - 3) % 2 === 1) row.eachCell(cell => { cell.fill = lightBlueFill; });
         row.eachCell(cell => { cell.alignment = { horizontal: "center", vertical: "middle" }; });
+      }
+      for (let c = 3; c <= rankGroups.length * 3; c += 3) {
+        rankSheet.getColumn(c).numFmt = "0.00%";
       }
       rankSheet.columns.forEach(column => { column.width = 14; });
 
@@ -1857,7 +1971,7 @@ function App() {
                   <table className="w-full text-center text-sm whitespace-nowrap">
                     <thead className="bg-slate-900 text-white font-black"><tr><th className="px-4 py-4">客服名稱</th><th className="px-4 py-4">班別</th><th className="px-4 py-4">日期</th><th className="px-4 py-4">時間</th><th className="px-4 py-4">遊戲專線</th><th className="px-4 py-4">滿意度問題1</th><th className="px-4 py-4">滿意度問題2</th><th className="px-4 py-4">對話ID</th></tr></thead>
                     <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                      {previewRows.length === 0 ? <tr><td colSpan="8" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewRows.map((r, i) => (
+                      {previewRows.length === 0 ? <tr><td colSpan="10" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewRows.map((r, i) => (
                         <tr key={i} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
                           <td className="px-4 py-4">{r.agent}</td><td className="px-4 py-4">{r.shift || "-"}</td><td className="px-4 py-4">{formatCustomDate(r.date)}</td><td className="px-4 py-4">{r.time}</td><td className="px-4 py-4">{r.line}</td><td className="px-4 py-4">{r.q1}</td><td className="px-4 py-4">{r.q2}</td><td className="px-4 py-4">{r.id}</td>
                         </tr>
@@ -1873,7 +1987,7 @@ function App() {
                   <table className="w-full text-center text-sm whitespace-nowrap">
                     <thead className="bg-slate-900 text-white font-black"><tr>{SUMMARY_HEADERS.map(h => <th key={h} className="px-4 py-4">{h}</th>)}</tr></thead>
                     <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                      {previewSummary.handleRows.length === 0 ? <tr><td colSpan="8" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewSummary.handleRows.map((r, i) => (
+                      {previewSummary.handleRows.length === 0 ? <tr><td colSpan="10" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewSummary.handleRows.map((r, i) => (
                         <tr key={i} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
                           {SUMMARY_HEADERS.map(h => <td key={h} className="px-4 py-4">{["客服名稱", "班別"].includes(h) ? (r[h] || "-") : formatToHours(r[h])}</td>)}
                         </tr>
@@ -1889,7 +2003,7 @@ function App() {
                   <table className="w-full text-center text-sm whitespace-nowrap">
                     <thead className="bg-slate-900 text-white font-black"><tr>{SUMMARY_HEADERS.map(h => <th key={h} className="px-4 py-4">{h}</th>)}</tr></thead>
                     <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                      {previewSummary.speakRows.length === 0 ? <tr><td colSpan="8" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewSummary.speakRows.map((r, i) => (
+                      {previewSummary.speakRows.length === 0 ? <tr><td colSpan="10" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewSummary.speakRows.map((r, i) => (
                         <tr key={i} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
                           {SUMMARY_HEADERS.map(h => <td key={h} className="px-4 py-4">{["客服名稱", "班別"].includes(h) ? (r[h] || "-") : formatToHours(r[h])}</td>)}
                         </tr>
@@ -1907,21 +2021,21 @@ function App() {
                       <tr>
                         <th className="px-4 py-4">客服名稱</th><th className="px-4 py-4">班別</th><th className="px-4 py-4">總通話數</th>
                         <th className="px-4 py-4">Q1非常滿意</th><th className="px-4 py-4">Q1尚可</th><th className="px-4 py-4">Q1非常不滿意</th>
-                        <th className="px-4 py-4">人員滿意度(Q1)</th><th className="px-4 py-4">人員調查率(Q1)</th>
+                        <th className="px-4 py-4">人員調查率(Q1)</th><th className="px-4 py-4">Q1未回答率</th><th className="px-4 py-4">Q1非常滿意率</th><th className="px-4 py-4">Q1尚可率</th><th className="px-4 py-4">Q1非常不滿意率</th>
                         <th className="px-4 py-4">Q2非常滿意</th><th className="px-4 py-4">Q2尚可</th><th className="px-4 py-4">Q2非常不滿意</th>
-                        <th className="px-4 py-4">問題滿意度(Q2)</th><th className="px-4 py-4">問題調查率(Q2)</th>
-                        <th className="px-4 py-4">整體滿意度平均</th><th className="px-4 py-4">整體調查率平均</th>
+                        <th className="px-4 py-4">問題調查率(Q2)</th><th className="px-4 py-4">Q2未回答率</th><th className="px-4 py-4">Q2非常滿意率</th><th className="px-4 py-4">Q2尚可率</th><th className="px-4 py-4">Q2非常不滿意率</th>
+                        <th className="px-4 py-4">整體調查率平均</th><th className="px-4 py-4">整體未回答率平均</th><th className="px-4 py-4">整體非常滿意率</th><th className="px-4 py-4">整體尚可率</th><th className="px-4 py-4">整體非常不滿意率</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                      {previewAnalysisRows.length === 0 ? <tr><td colSpan="15" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewAnalysisRows.map((r, i) => (
+                      {previewAnalysisRows.length === 0 ? <tr><td colSpan="17" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewAnalysisRows.map((r, i) => (
                         <tr key={i} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
                           <td className="px-4 py-4">{r["客服名稱"]}</td><td className="px-4 py-4">{r["班別"] || "-"}</td><td className="px-4 py-4">{r["總通話數"]}</td>
                           <td className="px-4 py-4">{r["Q1非常滿意"]}</td><td className="px-4 py-4">{r["Q1尚可"]}</td><td className="px-4 py-4">{r["Q1非常不滿意"]}</td>
-                          <td className="px-4 py-4">{formatPercent(Number(r["人員滿意度(Q1)"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["人員調查率(Q1)"] || 0) * 100)}</td>
+                          <td className="px-4 py-4">{formatPercent(Number(r["人員調查率(Q1)"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["Q1未回答率"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["Q1非常滿意率"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["Q1尚可率"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["Q1非常不滿意率"] || 0) * 100)}</td>
                           <td className="px-4 py-4">{r["Q2非常滿意"]}</td><td className="px-4 py-4">{r["Q2尚可"]}</td><td className="px-4 py-4">{r["Q2非常不滿意"]}</td>
-                          <td className="px-4 py-4">{formatPercent(Number(r["問題滿意度(Q2)"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["問題調查率(Q2)"] || 0) * 100)}</td>
-                          <td className="px-4 py-4">{formatPercent(Number(r["整體滿意度平均"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["整體調查率平均"] || 0) * 100)}</td>
+                          <td className="px-4 py-4">{formatPercent(Number(r["問題調查率(Q2)"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["Q2未回答率"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["Q2非常滿意率"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["Q2尚可率"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["Q2非常不滿意率"] || 0) * 100)}</td>
+                          <td className="px-4 py-4">{formatPercent(Number(r["整體調查率平均"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["整體未回答率平均"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["整體非常滿意率"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["整體尚可率"] || 0) * 100)}</td><td className="px-4 py-4">{formatPercent(Number(r["整體非常不滿意率"] || 0) * 100)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1933,12 +2047,21 @@ function App() {
                 <div className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2"><Icon name="trophy" size={20} className="text-rose-500"/>五、滿意度排名</div>
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                   {[
-                    ["人員滿意度(Q1)", previewRanking.q1Sat],
                     ["人員調查率(Q1)", previewRanking.q1Sur],
-                    ["問題滿意度(Q2)", previewRanking.q2Sat],
+                    ["Q1未回答率", previewRanking.q1Unanswered],
+                    ["Q1非常滿意率", previewRanking.q1VerySat],
+                    ["Q1尚可率", previewRanking.q1Ok],
+                    ["Q1非常不滿意率", previewRanking.q1VeryUnsat],
                     ["問題調查率(Q2)", previewRanking.q2Sur],
-                    ["整體滿意度平均", previewRanking.overallSat],
-                    ["整體調查率平均", previewRanking.overallSur]
+                    ["Q2未回答率", previewRanking.q2Unanswered],
+                    ["Q2非常滿意率", previewRanking.q2VerySat],
+                    ["Q2尚可率", previewRanking.q2Ok],
+                    ["Q2非常不滿意率", previewRanking.q2VeryUnsat],
+                    ["整體調查率平均", previewRanking.overallSur],
+                    ["整體未回答率平均", previewRanking.overallUnanswered],
+                    ["整體非常滿意率", previewRanking.overallVerySat],
+                    ["整體尚可率", previewRanking.overallOk],
+                    ["整體非常不滿意率", previewRanking.overallVeryUnsat]
                   ].map(([title, rows], idx) => (
                     <div key={idx} className="overflow-x-auto custom-scrollbar rounded-3xl border">
                       <table className="w-full text-center text-sm whitespace-nowrap">
@@ -2026,11 +2149,11 @@ function App() {
             </div>
             <div className="overflow-x-auto custom-scrollbar rounded-3xl border">
               <table className="w-full text-center text-sm whitespace-nowrap">
-                <thead className="bg-slate-900 text-white font-black"><tr><th className="px-6 py-4">期間</th><th className="px-6 py-4">顯示標籤</th><th className="px-6 py-4">總通話數</th><th className="px-6 py-4">整體滿意度平均</th><th className="px-6 py-4">整體調查率平均</th><th className="px-6 py-4">GT+儲值專線</th><th className="px-6 py-4">滿貫專線</th><th className="px-6 py-4">金好運專線</th></tr></thead>
+                <thead className="bg-slate-900 text-white font-black"><tr><th className="px-6 py-4">期間</th><th className="px-6 py-4">顯示標籤</th><th className="px-6 py-4">總通話數</th><th className="px-6 py-4">整體調查率平均</th><th className="px-6 py-4">整體未回答率平均</th><th className="px-6 py-4">整體非常滿意率</th><th className="px-6 py-4">整體尚可率</th><th className="px-6 py-4">整體非常不滿意率</th><th className="px-6 py-4">GT+儲值專線</th><th className="px-6 py-4">滿貫專線</th><th className="px-6 py-4">金好運專線</th></tr></thead>
                 <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                  {periodList.length === 0 ? <tr><td colSpan="8" className="px-6 py-12 text-slate-400">目前沒有符合篩選條件的雲端資料</td></tr> : periodList.map((item, i) => (
+                  {periodList.length === 0 ? <tr><td colSpan="11" className="px-6 py-12 text-slate-400">目前沒有符合篩選條件的雲端資料</td></tr> : periodList.map((item, i) => (
                     <tr key={item.periodKey} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
-                      <td className="px-6 py-4 font-black text-blue-700">{formatPeriodKeyForDisplay(item)}</td><td className="px-6 py-4">{viewType === "weeks" ? formatWeekDisplay(item.periodKey, item.periodLabel) : item.periodLabel}</td><td className="px-6 py-4 font-mono">{item.teamTotalCalls}</td><td className="px-6 py-4 font-mono">{formatPercent(item.overallSatAvg)}</td><td className="px-6 py-4 font-mono">{formatPercent(item.overallSurAvg)}</td><td className="px-6 py-4 font-mono">{formatToHours(item.teamLineTime["GT+儲值專線"])}</td><td className="px-6 py-4 font-mono">{formatToHours(item.teamLineTime["滿貫專線"])}</td><td className="px-6 py-4 font-mono">{formatToHours(item.teamLineTime["金好運專線"])}</td>
+                      <td className="px-6 py-4 font-black text-blue-700">{formatPeriodKeyForDisplay(item)}</td><td className="px-6 py-4">{viewType === "weeks" ? formatWeekDisplay(item.periodKey, item.periodLabel) : item.periodLabel}</td><td className="px-6 py-4 font-mono">{item.teamTotalCalls}</td><td className="px-6 py-4 font-mono">{formatPercent(item.overallSurAvg)}</td><td className="px-6 py-4 font-mono">{formatPercent(item.overallUnansweredAvg)}</td><td className="px-6 py-4 font-mono">{formatPercent(item.overallVerySatAvg)}</td><td className="px-6 py-4 font-mono">{formatPercent(item.overallOkAvg)}</td><td className="px-6 py-4 font-mono">{formatPercent(item.overallVeryUnsatAvg)}</td><td className="px-6 py-4 font-mono">{formatToHours(item.teamLineTime["GT+儲值專線"])}</td><td className="px-6 py-4 font-mono">{formatToHours(item.teamLineTime["滿貫專線"])}</td><td className="px-6 py-4 font-mono">{formatToHours(item.teamLineTime["金好運專線"])}</td>
                     </tr>
                   ))}
                 </tbody>
