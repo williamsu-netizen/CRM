@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>客服電話紀錄長期觀察系統（雲端主版｜週整合版）</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://www.gstatic.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebaseinstallations.googleapis.com wss://*.firebaseio.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests" />
+  <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(), payment=()" />
+  <meta name="referrer" content="no-referrer" />
+  <title>客服電話紀錄長期觀察系統（雲端主版｜週整合優化版）</title>
 
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -56,6 +59,49 @@ try {
 } catch (e) {
   console.warn("Firebase init failed", e);
 }
+
+const SECURITY_CONFIG = {
+  maxLoginFailures: 5,
+  lockoutMinutes: 15,
+  sessionTimeoutMinutes: 30
+};
+const LOGIN_LOCK_KEY = "weekly_call_project_login_lock";
+const SESSION_TIMEOUT_MS = SECURITY_CONFIG.sessionTimeoutMinutes * 60 * 1000;
+
+const getLoginLockState = () => {
+  try {
+    const raw = localStorage.getItem(LOGIN_LOCK_KEY);
+    if (!raw) return { failures: 0, lockedUntil: 0 };
+    const state = JSON.parse(raw);
+    if (Number(state.lockedUntil || 0) && Date.now() < Number(state.lockedUntil)) return state;
+    if (Number(state.lockedUntil || 0) && Date.now() >= Number(state.lockedUntil)) {
+      localStorage.removeItem(LOGIN_LOCK_KEY);
+      return { failures: 0, lockedUntil: 0 };
+    }
+    return { failures: Number(state.failures || 0), lockedUntil: 0 };
+  } catch (e) {
+    return { failures: 0, lockedUntil: 0 };
+  }
+};
+
+const recordLoginFailure = () => {
+  const current = getLoginLockState();
+  const failures = Number(current.failures || 0) + 1;
+  const lockedUntil = failures >= SECURITY_CONFIG.maxLoginFailures ? Date.now() + SECURITY_CONFIG.lockoutMinutes * 60 * 1000 : 0;
+  const next = { failures, lockedUntil };
+  localStorage.setItem(LOGIN_LOCK_KEY, JSON.stringify(next));
+  return next;
+};
+
+const clearLoginFailures = () => {
+  try { localStorage.removeItem(LOGIN_LOCK_KEY); } catch (e) {}
+};
+
+const formatLockoutText = (lockedUntil) => {
+  const remainMs = Math.max(0, Number(lockedUntil || 0) - Date.now());
+  const remainMin = Math.ceil(remainMs / 60000);
+  return remainMin > 0 ? `登入失敗次數過多，請 ${remainMin} 分鐘後再試。` : "";
+};
 
 const EMPTY_SHIFT_RULES = { default: { "早班": [], "中班": [], "晚班": [] } };
 const EMPTY_CSV_RESULT = {
@@ -433,8 +479,6 @@ const summarizePreviewRows = (rows = []) => ({
   speakRows: buildSummaryRowsFromSource(rows, "speak")
 });
 
-const VALID_SURVEY_ANSWERS = ["非常滿意", "尚可", "非常不滿意"];
-
 const buildSatisfactionAnalysisRows = (rows = []) => {
   const map = new Map();
   rows.forEach(row => {
@@ -494,8 +538,6 @@ const buildSatisfactionAnalysisRows = (rows = []) => {
     const q2VerySatRate = q2Answered ? row["Q2非常滿意"] / q2Answered : 0;
     const q2OkRate = q2Answered ? row["Q2尚可"] / q2Answered : 0;
     const q2VeryUnsatRate = q2Answered ? row["Q2非常不滿意"] / q2Answered : 0;
-    const q1SatRate = q1VerySatRate + q1OkRate;
-    const q2SatRate = q2VerySatRate + q2OkRate;
     return {
       ...row,
       "人員非常滿意度(Q1)": q1VerySatRate,
@@ -581,6 +623,25 @@ const getRowDateSortValue = (row = {}) => {
   return dt ? dt.getTime() : 0;
 };
 
+const getMonthEndMillis = (monthKey = "") => {
+  const m = String(monthKey || "").match(/^(\d{4})-(\d{2})$/);
+  if (!m) return 0;
+  return new Date(Number(m[1]), Number(m[2]), 0, 23, 59, 59, 999).getTime();
+};
+
+const getIsoWeekStartMillis = (weekKey = "") => {
+  const m = String(weekKey || "").match(/^(\d{4})-W(\d{2})$/);
+  if (!m) return 0;
+  const year = Number(m[1]);
+  const week = Number(m[2]);
+  const jan4 = new Date(year, 0, 4);
+  const jan4Day = jan4.getDay() || 7;
+  const firstWeekMonday = new Date(jan4);
+  firstWeekMonday.setDate(jan4.getDate() - jan4Day + 1);
+  firstWeekMonday.setDate(firstWeekMonday.getDate() + (week - 1) * 7);
+  return firstWeekMonday.getTime();
+};
+
 const getReportContentSortValue = (item = {}, rows = []) => {
   let maxTime = 0;
   (rows || []).forEach(row => {
@@ -590,15 +651,17 @@ const getReportContentSortValue = (item = {}, rows = []) => {
   if (maxTime > 0) return maxTime;
 
   const monthKeys = Array.isArray(item.monthKeys) ? item.monthKeys.filter(Boolean) : [];
-  if (monthKeys.length) return monthKeys.slice().sort().at(-1) + '-31';
+  if (monthKeys.length) return getMonthEndMillis(monthKeys.slice().sort().at(-1));
 
   const weekKeys = Array.isArray(item.weekKeys) ? item.weekKeys.filter(Boolean) : [];
-  if (weekKeys.length) return weekKeys.slice().sort().at(-1);
+  if (weekKeys.length) return getIsoWeekStartMillis(weekKeys.slice().sort().at(-1));
 
   const yearKeys = Array.isArray(item.yearKeys) ? item.yearKeys.filter(Boolean) : [];
-  if (yearKeys.length) return yearKeys.slice().sort().at(-1) + '-12-31';
+  if (yearKeys.length) return new Date(Number(yearKeys.slice().sort().at(-1)), 11, 31, 23, 59, 59, 999).getTime();
 
-  return Number(item.createdAtMillis || item.createdAt?.seconds || 0);
+  const createdAtMillis = Number(item.createdAtMillis || 0);
+  if (createdAtMillis > 0) return createdAtMillis;
+  return Number(item.createdAt?.seconds || 0) * 1000;
 };
 
 const normalizeStoredRow = (row = {}) => {
@@ -631,10 +694,40 @@ const normalizeStoredRow = (row = {}) => {
   };
 };
 
-const Icon = ({ name, size = 18, className = "" }) => {
-  useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
-  return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+const Icon = React.memo(({ name, size = 18, className = "" }) => (
+  <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>
+));
+
+const paginateRows = (rows = [], page = 1, pageSize = 100) => {
+  const safePageSize = Number(pageSize || 100);
+  const totalPages = Math.max(1, Math.ceil((rows || []).length / safePageSize));
+  const safePage = Math.min(Math.max(Number(page || 1), 1), totalPages);
+  const start = (safePage - 1) * safePageSize;
+  return { rows: rows.slice(start, start + safePageSize), safePage, totalPages, start };
 };
+
+function PaginationControls({ total = 0, page = 1, pageSize = 100, onPageChange, onPageSizeChange }) {
+  const totalPages = Math.max(1, Math.ceil(Number(total || 0) / Number(pageSize || 100)));
+  const safePage = Math.min(Math.max(Number(page || 1), 1), totalPages);
+  const start = total ? (safePage - 1) * Number(pageSize) + 1 : 0;
+  const end = Math.min(total, safePage * Number(pageSize));
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-slate-50 border-x border-b rounded-b-3xl text-sm font-bold text-slate-600">
+      <div>顯示 {start} - {end} / 共 {total} 筆</div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span>每頁</span>
+        <select value={pageSize} onChange={(e)=>{ onPageSizeChange(Number(e.target.value)); onPageChange(1); }} className="border border-slate-300 rounded-xl px-3 py-2 bg-white font-bold">
+          {[50,100,200,500,1000].map(size => <option key={size} value={size}>{size}</option>)}
+        </select>
+        <button type="button" disabled={safePage <= 1} onClick={()=>onPageChange(1)} className="px-3 py-2 rounded-xl bg-white border disabled:opacity-40">首頁</button>
+        <button type="button" disabled={safePage <= 1} onClick={()=>onPageChange(safePage - 1)} className="px-3 py-2 rounded-xl bg-white border disabled:opacity-40">上一頁</button>
+        <span className="px-2">{safePage} / {totalPages}</span>
+        <button type="button" disabled={safePage >= totalPages} onClick={()=>onPageChange(safePage + 1)} className="px-3 py-2 rounded-xl bg-white border disabled:opacity-40">下一頁</button>
+        <button type="button" disabled={safePage >= totalPages} onClick={()=>onPageChange(totalPages)} className="px-3 py-2 rounded-xl bg-white border disabled:opacity-40">末頁</button>
+      </div>
+    </div>
+  );
+}
 
 function HistoryChart({ type = "line", labels = [], datasets = [], title = "" }) {
   const canvasRef = useRef(null);
@@ -648,7 +741,7 @@ function HistoryChart({ type = "line", labels = [], datasets = [], title = "" })
       options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: !!title, text: title }, legend: { display: true } } }
     });
     return () => chartRef.current && chartRef.current.destroy();
-  }, [type, JSON.stringify(labels), JSON.stringify(datasets), title]);
+  }, [type, labels, datasets, title]);
   return <div className="chart-wrap"><canvas ref={canvasRef}></canvas></div>;
 }
 
@@ -658,13 +751,18 @@ function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [loginLockText, setLoginLockText] = useState(formatLockoutText(getLoginLockState().lockedUntil));
   const [syncStatus, setSyncStatus] = useState(firebaseReady ? "尚未登入" : "目前為本機模式");
-  const [activeTab, setActiveTab] = useState("shift");
+  const [activeTab, setActiveTab] = useState("weekly");
   const [shiftRules, setShiftRules] = useState(EMPTY_SHIFT_RULES);
   const [cloudMasterStore, setCloudMasterStore] = useState(EMPTY_CLOUD_STORE);
   const [csvResult, setCsvResult] = useState(EMPTY_CSV_RESULT);
   const [csvFileName, setCsvFileName] = useState("");
   const [previewRows, setPreviewRows] = useState([]);
+  const [previewPage, setPreviewPage] = useState(1);
+  const [previewPageSize, setPreviewPageSize] = useState(100);
+  const [detailPage, setDetailPage] = useState(1);
+  const [detailPageSize, setDetailPageSize] = useState(100);
   const [previewMeta, setPreviewMeta] = useState(EMPTY_PREVIEW_META);
   const [shiftMonthInput, setShiftMonthInput] = useState("");
   const [shiftEditorMonth, setShiftEditorMonth] = useState("default");
@@ -701,6 +799,12 @@ function App() {
   const fileInputRef = useRef(null);
 
   useEffect(() => {
+    if (window.lucide) {
+      window.requestAnimationFrame(() => window.lucide.createIcons());
+    }
+  }, [activeTab, previewRows.length, detailRows.length, cloudIndex.length]);
+
+  useEffect(() => {
     try {
       const savedRules = localStorage.getItem("weekly_call_project_shift_rules");
       if (savedRules) setShiftRules(JSON.parse(savedRules));
@@ -711,27 +815,34 @@ function App() {
     } catch (e) {}
   }, []);
 
-  const getAllAgentsFromShiftRules = useCallback(() => {
+  const getAllAgentsFromRules = useCallback((rules = shiftRules) => {
     const set = new Set();
-    Object.values(shiftRules || {}).forEach(group => Object.values(group || {}).forEach(names => (names || []).forEach(n => set.add(n))));
+    Object.values(rules || {}).forEach(group => Object.values(group || {}).forEach(names => (names || []).forEach(n => set.add(n))));
     return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hant"));
   }, [shiftRules]);
 
-  const getShiftInfoByMonth = useCallback((agentName, monthKey, existingShift = "") => {
+  const getAllAgentsFromShiftRules = useCallback(() => getAllAgentsFromRules(shiftRules), [getAllAgentsFromRules, shiftRules]);
+
+  const getShiftInfoFromRules = useCallback((rules, agentName, monthKey, existingShift = "") => {
+    const activeRules = rules || EMPTY_SHIFT_RULES;
     const normalizedMonth = normalizeMonthKey(monthKey);
-    const monthRules = shiftRules[normalizedMonth];
+    const monthRules = activeRules[normalizedMonth];
     if (monthRules) {
       for (const [shift, names] of Object.entries(monthRules)) {
         if ((names || []).includes(agentName)) return { shift, source: "月份班表" };
       }
     }
-    const defaultRules = shiftRules.default || EMPTY_SHIFT_RULES.default;
+    const defaultRules = activeRules.default || EMPTY_SHIFT_RULES.default;
     for (const [shift, names] of Object.entries(defaultRules)) {
       if ((names || []).includes(agentName)) return { shift, source: "default 班表" };
     }
     if (existingShift) return { shift: existingShift, source: "雲端舊資料" };
     return { shift: "", source: "未設定" };
-  }, [shiftRules]);
+  }, []);
+
+  const getShiftInfoByMonth = useCallback((agentName, monthKey, existingShift = "") => {
+    return getShiftInfoFromRules(shiftRules, agentName, monthKey, existingShift);
+  }, [getShiftInfoFromRules, shiftRules]);
 
   const getShiftByMonth = useCallback((agentName, monthKey, existingShift = "") => {
     return getShiftInfoByMonth(agentName, monthKey, existingShift).shift;
@@ -752,11 +863,13 @@ function App() {
     }
   };
 
-  const buildAgentStats = useCallback((rows, periodMonthKey = "") => {
+  const buildAgentStats = useCallback((rows, periodMonthKey = "", rulesOverride = null) => {
     const agentBase = {};
-    getAllAgentsFromShiftRules().forEach(name => {
+    const activeRules = rulesOverride || shiftRules;
+    const getShiftForStats = (agentName, monthKey, existingShift = "") => getShiftInfoFromRules(activeRules, agentName, monthKey, existingShift).shift;
+    getAllAgentsFromRules(activeRules).forEach(name => {
       agentBase[name] = {
-        name, shift: getShiftByMonth(name, periodMonthKey), totalCalls: 0,
+        name, shift: getShiftForStats(name, periodMonthKey), totalCalls: 0,
         q1Answered: 0, q1Satisfied: 0, q1VerySatisfied: 0, q1Ok: 0, q1VeryUnsatisfied: 0, q2Answered: 0, q2Satisfied: 0, q2VerySatisfied: 0, q2Ok: 0, q2VeryUnsatisfied: 0,
         lines: { "GT專線": 0, "儲值專線": 0, "GT+儲值專線": 0, "滿貫專線": 0, "金好運專線": 0 }
       };
@@ -766,7 +879,7 @@ function App() {
       if (!agentBase[d.agent]) {
         agentBase[d.agent] = {
           name: d.agent,
-          shift: d.shift || getShiftByMonth(d.agent, d.monthKey || periodMonthKey),
+          shift: d.shift || getShiftForStats(d.agent, d.monthKey || periodMonthKey),
           totalCalls: 0, q1Answered: 0, q1Satisfied: 0, q1VerySatisfied: 0, q1Ok: 0, q1VeryUnsatisfied: 0, q2Answered: 0, q2Satisfied: 0, q2VerySatisfied: 0, q2Ok: 0, q2VeryUnsatisfied: 0,
           lines: { "GT專線": 0, "儲值專線": 0, "GT+儲值專線": 0, "滿貫專線": 0, "金好運專線": 0 }
         };
@@ -796,13 +909,11 @@ function App() {
     });
 
     return Object.values(agentBase).map(a => {
-      const q1SatRate = a.q1Answered ? (a.q1Satisfied / a.q1Answered) * 100 : 0;
       const q1VerySatRate = a.q1Answered ? (a.q1VerySatisfied / a.q1Answered) * 100 : 0;
       const q1OkRate = a.q1Answered ? (a.q1Ok / a.q1Answered) * 100 : 0;
       const q1VeryUnsatRate = a.q1Answered ? (a.q1VeryUnsatisfied / a.q1Answered) * 100 : 0;
       const q1SurRate = a.totalCalls ? (a.q1Answered / a.totalCalls) * 100 : 0;
       const q1UnansweredRate = a.totalCalls ? ((a.totalCalls - a.q1Answered) / a.totalCalls) * 100 : 0;
-      const q2SatRate = a.q2Answered ? (a.q2Satisfied / a.q2Answered) * 100 : 0;
       const q2VerySatRate = a.q2Answered ? (a.q2VerySatisfied / a.q2Answered) * 100 : 0;
       const q2OkRate = a.q2Answered ? (a.q2Ok / a.q2Answered) * 100 : 0;
       const q2VeryUnsatRate = a.q2Answered ? (a.q2VeryUnsatisfied / a.q2Answered) * 100 : 0;
@@ -810,8 +921,8 @@ function App() {
       const q2UnansweredRate = a.totalCalls ? ((a.totalCalls - a.q2Answered) / a.totalCalls) * 100 : 0;
       return {
         ...a,
-        q1SatRate, q1SurRate, q1UnansweredRate, q1VerySatRate, q1OkRate, q1VeryUnsatRate,
-        q2SatRate, q2SurRate, q2UnansweredRate, q2VerySatRate, q2OkRate, q2VeryUnsatRate,
+        q1SurRate, q1UnansweredRate, q1VerySatRate, q1OkRate, q1VeryUnsatRate,
+        q2SurRate, q2UnansweredRate, q2VerySatRate, q2OkRate, q2VeryUnsatRate,
         overallSatAvg: (q1VerySatRate + q2VerySatRate) / 2,
         overallVerySatAvg: (q1VerySatRate + q2VerySatRate) / 2,
         overallOkAvg: (q1OkRate + q2OkRate) / 2,
@@ -820,11 +931,11 @@ function App() {
         overallUnansweredAvg: (q1UnansweredRate + q2UnansweredRate) / 2
       };
     });
-  }, [getAllAgentsFromShiftRules, getShiftByMonth]);
+  }, [getAllAgentsFromRules, getShiftInfoFromRules, shiftRules]);
 
-  const buildPeriodSummary = useCallback((rows, periodKey, periodLabel, extra = {}) => {
+  const buildPeriodSummary = useCallback((rows, periodKey, periodLabel, extra = {}, rulesOverride = null) => {
     const periodMonthKey = rows[0]?.monthKey || extra.month || "";
-    const analysisList = buildAgentStats(rows, periodMonthKey);
+    const analysisList = buildAgentStats(rows, periodMonthKey, rulesOverride);
     const lineTotals = { "GT專線": 0, "儲值專線": 0, "GT+儲值專線": 0, "滿貫專線": 0, "金好運專線": 0 };
     analysisList.forEach(a => Object.keys(lineTotals).forEach(k => { lineTotals[k] += a.lines[k]; }));
     let satTotal = 0, verySatTotal = 0, okTotal = 0, veryUnsatTotal = 0, satCount = 0, surTotal = 0, unansweredTotal = 0, surCount = 0, teamTotalCalls = 0;
@@ -868,39 +979,24 @@ function App() {
     return [];
   }, []);
 
-  const deleteReportWithChunks = useCallback(async (reportId) => {
-    const chunksSnap = await db.collection('weekly_call_project_reports').doc(reportId).collection('rows_chunks').get();
-    if (!chunksSnap.empty) {
-      let batch = db.batch();
-      let count = 0;
-      for (const doc of chunksSnap.docs) {
-        batch.delete(doc.ref);
-        count += 1;
-        if (count >= 400) {
-          await batch.commit();
-          batch = db.batch();
-          count = 0;
-        }
-      }
-      if (count > 0) await batch.commit();
-    }
-    await db.collection('weekly_call_project_reports').doc(reportId).delete();
-  }, []);
 
   const loadCloudBundle = async (opts = { autoPreview: true }) => {
     if (!firebaseReady || !user || !db) return;
     const autoPreview = opts.autoPreview !== false;
+    const activeShiftRules = opts.shiftRulesOverride || shiftRules;
+    const getShiftForLoad = (agentName, monthKey, existingShift = "") => getShiftInfoFromRules(activeShiftRules, agentName, monthKey, existingShift);
     try {
       setSyncStatus("雲端資料讀取中...");
       const reportsSnap = await db.collection("weekly_call_project_reports").get();
-      const rawItems = reportsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const rawItems = reportsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(item => !item.deleted);
       const reportRowsMap = new Map();
+      const rowsResults = await Promise.all(rawItems.map(item => fetchRowsFromReportDoc(item)));
       let allRows = [];
-      for (const item of rawItems) {
-        const rows = await fetchRowsFromReportDoc(item);
+      rawItems.forEach((item, index) => {
+        const rows = rowsResults[index] || [];
         reportRowsMap.set(item.id, rows);
         allRows = allRows.concat(rows);
-      }
+      });
       const items = rawItems.map(item => ({ ...item, __contentSortValue: getReportContentSortValue(item, reportRowsMap.get(item.id) || []) }));
       items.sort((a, b) => {
         const av = a.__contentSortValue || 0;
@@ -909,7 +1005,7 @@ function App() {
         return bv > av ? 1 : -1;
       });
       setCloudIndex(items);
-      allRows = dedupeRows(allRows.map(r => { const n = normalizeStoredRow(r); const si = getShiftInfoByMonth(n.agent, n.monthKey, n.shift); return { ...n, shift: n.shift || si.shift, shiftSource: n.shiftSource || si.source }; }));
+      allRows = dedupeRows(allRows.map(r => { const n = normalizeStoredRow(r); const si = getShiftForLoad(n.agent, n.monthKey, n.shift); return { ...n, shift: n.shift || si.shift, shiftSource: n.shiftSource || si.source }; }));
       allRows.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
       const weeks = {}, months = {}, years = {}, detailByWeek = {};
       const weekGroups = {}, monthGroups = {}, yearGroups = {};
@@ -924,11 +1020,11 @@ function App() {
       });
       Object.entries(weekGroups).forEach(([key, rows]) => {
         const first = rows[0];
-        weeks[key] = buildPeriodSummary(rows, key, first.weekLabel, { year: first.yearKey, month: first.monthKey, weekStart: first.weekStart, weekEnd: first.weekEnd });
+        weeks[key] = buildPeriodSummary(rows, key, first.weekLabel, { year: first.yearKey, month: first.monthKey, weekStart: first.weekStart, weekEnd: first.weekEnd }, activeShiftRules);
         detailByWeek[key] = { weekKey: key, weekLabel: first.weekLabel, rows: rows.map(r => ({ ...r })) };
       });
-      Object.entries(monthGroups).forEach(([key, rows]) => { const first = rows[0]; months[key] = buildPeriodSummary(rows, key, key, { year: first.yearKey, month: key }); });
-      Object.entries(yearGroups).forEach(([key, rows]) => { years[key] = buildPeriodSummary(rows, key, key, { year: key }); });
+      Object.entries(monthGroups).forEach(([key, rows]) => { const first = rows[0]; months[key] = buildPeriodSummary(rows, key, key, { year: first.yearKey, month: key }, activeShiftRules); });
+      Object.entries(yearGroups).forEach(([key, rows]) => { years[key] = buildPeriodSummary(rows, key, key, { year: key }, activeShiftRules); });
       const newStore = { rows: allRows, weeks, months, years, detailByWeek };
       setCloudMasterStore(newStore);
 
@@ -950,7 +1046,7 @@ function App() {
       if (autoPreview && items.length > 0) {
         const latest = items[0];
         const latestRows = reportRowsMap.get(latest.id) || [];
-        const preview = dedupeRows(latestRows.map(r => { const n = normalizeStoredRow(r); const si = getShiftInfoByMonth(n.agent, n.monthKey, n.shift); return { ...n, shift: n.shift || si.shift, shiftSource: n.shiftSource || si.source }; })).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+        const preview = dedupeRows(latestRows.map(r => { const n = normalizeStoredRow(r); const si = getShiftForLoad(n.agent, n.monthKey, n.shift); return { ...n, shift: n.shift || si.shift, shiftSource: n.shiftSource || si.source }; })).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
         setPreviewRows(preview);
         setCsvFileName(latest.fileName || "雲端資料");
         setCsvResult(makeCsvResultFromPreviewRows(preview, latest.rawCount || latestRows.length));
@@ -980,14 +1076,17 @@ function App() {
       setUser(u);
       setAuthReady(true);
       if (u) {
+        setActiveTab("weekly");
         try {
           const shiftSnap = await db.collection("weekly_call_project").doc("shift_rules").get();
+          let rulesForInitialLoad = shiftRules;
           if (shiftSnap.exists) {
             const rules = shiftSnap.data().rules || EMPTY_SHIFT_RULES;
+            rulesForInitialLoad = rules;
             setShiftRules(rules);
             localStorage.setItem("weekly_call_project_shift_rules", JSON.stringify(rules));
           }
-          await loadCloudBundle({ autoPreview: true });
+          await loadCloudBundle({ autoPreview: true, shiftRulesOverride: rulesForInitialLoad });
         } catch (e) {
           console.error(e);
           setSyncStatus("雲端讀取失敗");
@@ -1103,16 +1202,13 @@ function App() {
       const targetWeekKey = sortedWeekKeys[0] || "";
 
       let keptRowsRaw = [];
-      let keptDetailRows = [];
       let mode = uploadMode;
       if (mode === "auto") mode = weekKeys.length <= 1 ? "single_week" : "multi_week";
 
       if (mode === "single_week") {
         keptRowsRaw = weeklyRows.filter(r => r.weekKey === targetWeekKey);
-        keptDetailRows = result.detailRows.filter(row => getWeekInfo(row["來電日期"], row["來電時間"] || "00:00:00")?.weekKey === targetWeekKey);
       } else {
         keptRowsRaw = weeklyRows;
-        keptDetailRows = result.detailRows;
       }
 
       const fileDuplicateCount = getDuplicateCount(keptRowsRaw);
@@ -1175,7 +1271,7 @@ function App() {
       });
 
       const now = new Date();
-      const docId = `${Date.now()}`;
+      const docId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const weekKeys = Array.from(new Set(previewUnique.map(r => r.weekKey).filter(Boolean))).sort();
       const monthKeys = Array.from(new Set(previewUnique.map(r => r.monthKey).filter(Boolean))).sort();
       const yearKeys = Array.from(new Set(previewUnique.map(r => r.yearKey).filter(Boolean))).sort();
@@ -1364,16 +1460,24 @@ function App() {
 
   const deleteSelectedCloudReports = async () => {
     if (!selectedCloudItems.length) return alert("請先勾選要刪除的雲端資料。");
-    if (!window.confirm(`是否要刪除 ${selectedCloudItems.length} 筆雲端資料？`)) return;
-    if (!window.confirm("此動作無法復原，是否再次確認刪除？")) return;
+    if (!window.confirm(`是否要將 ${selectedCloudItems.length} 筆雲端資料移到回收狀態？`)) return;
+    if (!window.confirm("資料會先標記為 deleted，不會立刻永久刪除；是否再次確認？")) return;
     try {
-      setSyncStatus("刪除雲端資料中...");
-      for (const id of selectedCloudItems) {
-        await deleteReportWithChunks(id);
-      }
+      setSyncStatus("標記刪除雲端資料中...");
+      const batch = db.batch();
+      selectedCloudItems.forEach(id => {
+        const ref = db.collection("weekly_call_project_reports").doc(id);
+        batch.set(ref, {
+          deleted: true,
+          deletedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          deletedAtMillis: Date.now(),
+          deletedBy: user?.email || ""
+        }, { merge: true });
+      });
+      await batch.commit();
       setSelectedCloudItems([]);
       await loadCloudBundle({ autoPreview: true });
-      alert("已刪除勾選的雲端資料。");
+      alert("已將勾選資料標記為刪除，雲端清單不再顯示。需要復原時可到 Firestore 將 deleted 改回 false。");
     } catch (e) {
       console.error(e);
       setSyncStatus("刪除雲端資料失敗");
@@ -1437,7 +1541,7 @@ function App() {
       setSelectedYears([...allYears]);
       setHistoryInitialized(true);
     }
-  }, [historyInitialized, JSON.stringify(allYears)]);
+  }, [historyInitialized, allYears]);
 
   useEffect(() => {
     if (!availableHistoryMonths.length) {
@@ -1453,7 +1557,7 @@ function App() {
       }
       return filtered;
     });
-  }, [JSON.stringify(availableHistoryMonths), historyMonthsInitialized]);
+  }, [availableHistoryMonths, historyMonthsInitialized]);
 
   useEffect(() => {
     if (!availableHistoryWeeks.length) {
@@ -1469,20 +1573,20 @@ function App() {
       }
       return filtered;
     });
-  }, [JSON.stringify(availableHistoryWeeks), historyWeeksInitialized]);
-  useEffect(() => { if (!selectedDetailWeek && allWeeks.length) setSelectedDetailWeek(allWeeks[allWeeks.length - 1]); }, [JSON.stringify(allWeeks), selectedDetailWeek]);
-  useEffect(() => { if (!selectedDetailMonth && allMonths.length) setSelectedDetailMonth(allMonths[allMonths.length - 1]); }, [JSON.stringify(allMonths), selectedDetailMonth]);
-  useEffect(() => { if (!selectedDetailYear && allYears.length) setSelectedDetailYear(allYears[allYears.length - 1]); }, [JSON.stringify(allYears), selectedDetailYear]);
-  useEffect(() => { if (!cloudLoadMonth && allMonths.length) setCloudLoadMonth(allMonths[allMonths.length - 1]); }, [JSON.stringify(allMonths), cloudLoadMonth]);
-  useEffect(() => { if (!weeklyExportWeek && allWeeks.length) setWeeklyExportWeek(allWeeks[allWeeks.length - 1]); }, [JSON.stringify(allWeeks), weeklyExportWeek]);
-  useEffect(() => { if (!weeklyExportMonth && allMonths.length) setWeeklyExportMonth(allMonths[allMonths.length - 1]); }, [JSON.stringify(allMonths), weeklyExportMonth]);
-  useEffect(() => { if (!weeklyExportYear && allYears.length) setWeeklyExportYear(allYears[allYears.length - 1]); }, [JSON.stringify(allYears), weeklyExportYear]);
+  }, [availableHistoryWeeks, historyWeeksInitialized]);
+  useEffect(() => { if (!selectedDetailWeek && allWeeks.length) setSelectedDetailWeek(allWeeks[allWeeks.length - 1]); }, [allWeeks, selectedDetailWeek]);
+  useEffect(() => { if (!selectedDetailMonth && allMonths.length) setSelectedDetailMonth(allMonths[allMonths.length - 1]); }, [allMonths, selectedDetailMonth]);
+  useEffect(() => { if (!selectedDetailYear && allYears.length) setSelectedDetailYear(allYears[allYears.length - 1]); }, [allYears, selectedDetailYear]);
+  useEffect(() => { if (!cloudLoadMonth && allMonths.length) setCloudLoadMonth(allMonths[allMonths.length - 1]); }, [allMonths, cloudLoadMonth]);
+  useEffect(() => { if (!weeklyExportWeek && allWeeks.length) setWeeklyExportWeek(allWeeks[allWeeks.length - 1]); }, [allWeeks, weeklyExportWeek]);
+  useEffect(() => { if (!weeklyExportMonth && allMonths.length) setWeeklyExportMonth(allMonths[allMonths.length - 1]); }, [allMonths, weeklyExportMonth]);
+  useEffect(() => { if (!weeklyExportYear && allYears.length) setWeeklyExportYear(allYears[allYears.length - 1]); }, [allYears, weeklyExportYear]);
   useEffect(() => {
     if (selectedAgent && trendCompareMode === "single") setSelectedTrendAgents([selectedAgent]);
   }, [selectedAgent, trendCompareMode]);
   useEffect(() => {
     if (!selectedTrendAgents.length && availableAgents.length) setSelectedTrendAgents([availableAgents[0]]);
-  }, [JSON.stringify(availableAgents)]);
+  }, [availableAgents]);
 
   const periodList = useMemo(() => {
     const raw = cloudMasterStore[viewType] || {};
@@ -1511,7 +1615,7 @@ function App() {
       const fallback = availableAgents.find(agent => getAgentTotalAcrossPeriods(agent, periodList) > 0) || availableAgents[0];
       if (fallback && fallback !== selectedAgent) setSelectedAgent(fallback);
     }
-  }, [JSON.stringify(periodList.map(p => p.periodKey)), JSON.stringify(availableAgents), selectedAgent, getAgentTotalAcrossPeriods]);
+  }, [periodList, availableAgents, selectedAgent, getAgentTotalAcrossPeriods]);
 
   useEffect(() => {
     if (trendCompareMode !== "multi") return;
@@ -1523,7 +1627,7 @@ function App() {
         if (fallback.length) setSelectedTrendAgents(fallback);
       }
     }
-  }, [trendCompareMode, JSON.stringify(periodList.map(p => p.periodKey)), JSON.stringify(selectedTrendAgents), JSON.stringify(availableAgents), getAgentTotalAcrossPeriods]);
+  }, [trendCompareMode, periodList, selectedTrendAgents, availableAgents, getAgentTotalAcrossPeriods]);
 
   const selectedMetricConfig = HISTORY_METRICS.find(m => m.key === selectedMetric) || HISTORY_METRICS[0];
   const getMetricValue = (item, agentName) => {
@@ -1559,7 +1663,7 @@ function App() {
       labels: periodList.map(p => formatPeriodKeyForDisplay(p)),
       datasets
     };
-  }, [JSON.stringify(trendAgents), periodList, selectedMetric]);
+  }, [trendAgents, periodList, selectedMetric]);
 
   const summaryRows = useMemo(() => {
     const targetAgents = trendCompareMode === "multi" ? selectedTrendAgents.filter(Boolean) : availableAgents;
@@ -1568,7 +1672,7 @@ function App() {
       periodList.forEach(p => { row[p.periodKey] = getMetricValue(p, name); if (!row.shift) row.shift = (p.agents || []).find(a => a.name === name)?.shift || row.shift; });
       return row;
     });
-  }, [availableAgents, periodList, selectedMetric, trendCompareMode, JSON.stringify(selectedTrendAgents)]);
+  }, [availableAgents, periodList, selectedMetric, trendCompareMode, selectedTrendAgents]);
 
   const detailRows = useMemo(() => {
     let rows = [];
@@ -1582,6 +1686,12 @@ function App() {
     if (selectedDetailMode === "months") return selectedDetailMonth ? formatMonthDisplay(selectedDetailMonth) : "尚未選擇月份";
     return selectedDetailYear ? formatYearDisplay(selectedDetailYear) : "尚未選擇年份";
   }, [selectedDetailMode, selectedDetailWeek, selectedDetailMonth, selectedDetailYear, cloudMasterStore]);
+
+  useEffect(() => { setPreviewPage(1); }, [previewRows]);
+  useEffect(() => { setDetailPage(1); }, [detailRows]);
+  const previewPaging = useMemo(() => paginateRows(previewRows, previewPage, previewPageSize), [previewRows, previewPage, previewPageSize]);
+  const detailPaging = useMemo(() => paginateRows(detailRows, detailPage, detailPageSize), [detailRows, detailPage, detailPageSize]);
+
   const previewSummary = useMemo(() => summarizePreviewRows(previewRows), [previewRows]);
   const previewAnalysisRows = useMemo(() => buildSatisfactionAnalysisRows(previewRows), [previewRows]);
   const previewRanking = useMemo(() => buildRankingRows(previewAnalysisRows), [previewAnalysisRows]);
@@ -1604,12 +1714,56 @@ function App() {
   const handleDragLeave = (e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); };
   const handleDrop = (e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); const files = e.dataTransfer.files; if (files && files.length > 0) handleDataUpload(files[0]); };
 
+  useEffect(() => {
+    const timer = setInterval(() => setLoginLockText(formatLockoutText(getLoginLockState().lockedUntil)), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseReady || !auth || !user) return;
+    let timeoutId = null;
+    const resetTimer = () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(async () => {
+        try {
+          await auth.signOut();
+          alert(`閒置超過 ${SECURITY_CONFIG.sessionTimeoutMinutes} 分鐘，系統已自動登出。`);
+        } catch (error) {
+          console.error("自動登出失敗", error);
+        }
+      }, SESSION_TIMEOUT_MS);
+    };
+    const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"];
+    events.forEach(eventName => window.addEventListener(eventName, resetTimer, { passive: true }));
+    resetTimer();
+    return () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      events.forEach(eventName => window.removeEventListener(eventName, resetTimer));
+    };
+  }, [user]);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError("");
+    const lockState = getLoginLockState();
+    if (lockState.lockedUntil && Date.now() < lockState.lockedUntil) {
+      const msg = formatLockoutText(lockState.lockedUntil);
+      setLoginLockText(msg);
+      return setLoginError(msg);
+    }
     if (!firebaseReady || !auth) return setLoginError("Firebase 尚未初始化");
-    try { await auth.signInWithEmailAndPassword(email, password); }
-    catch (error) { setLoginError("登入失敗，請檢查帳號密碼。"); console.error(error); }
+    try {
+      await auth.signInWithEmailAndPassword(email, password);
+      clearLoginFailures();
+      setLoginLockText("");
+    } catch (error) {
+      const next = recordLoginFailure();
+      const remain = Math.max(0, SECURITY_CONFIG.maxLoginFailures - Number(next.failures || 0));
+      const lockMsg = formatLockoutText(next.lockedUntil);
+      setLoginLockText(lockMsg);
+      setLoginError(lockMsg || `登入失敗，請檢查帳號密碼。剩餘可嘗試 ${remain} 次。`);
+      console.error(error);
+    }
   };
 
   const handleLogout = async () => { if (firebaseReady && auth) { try { await auth.signOut(); } catch (error) { console.error("登出失敗", error); } } };
@@ -1746,9 +1900,10 @@ function App() {
           <h2 className="text-3xl font-black mb-2 text-center text-slate-800">客服系統安全登入</h2>
           <p className="text-slate-400 text-sm font-bold text-center mb-6">登入後會自動抓取雲端資料</p>
           {loginError && <div className="text-red-500 text-sm mb-4 text-center font-bold">{loginError}</div>}
+          {loginLockText && !loginError && <div className="text-amber-600 bg-amber-50 border border-amber-200 rounded-xl text-sm mb-4 p-3 text-center font-bold">{loginLockText}</div>}
           <input type="email" placeholder="信箱" value={email} onChange={(e)=>setEmail(e.target.value)} required className="w-full mb-4 p-3 rounded-xl border border-slate-300" />
           <input type="password" placeholder="密碼" value={password} onChange={(e)=>setPassword(e.target.value)} required className="w-full mb-6 p-3 rounded-xl border border-slate-300" />
-          <button type="submit" className="w-full bg-blue-600 text-white font-bold p-3 rounded-xl hover:bg-blue-700">登入</button>
+          <button type="submit" disabled={!!loginLockText} className={`w-full text-white font-bold p-3 rounded-xl ${loginLockText ? "bg-slate-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}>登入</button>
         </form>
       </div>
     );
@@ -1763,7 +1918,6 @@ function App() {
               <Icon name="cloud" size={30} className="text-blue-600" />
               客服電話紀錄長期觀察系統（雲端主版｜週整合版）
             </h1>
-            <p className="text-slate-400 font-bold mt-2">已加入：整月一鍵載入、多週合併預覽、滿意度清洗（非非常滿意/尚可/非常不滿意皆為未回答）</p>
           </div>
           <div className="flex gap-3 flex-wrap items-center justify-end">
             <span className="text-sm font-bold text-slate-400">{syncStatus}</span>
@@ -1952,14 +2106,17 @@ function App() {
                   <table className="w-full text-center text-sm whitespace-nowrap">
                     <thead className="bg-slate-900 text-white font-black"><tr><th className="px-4 py-4">客服名稱</th><th className="px-4 py-4">班別</th><th className="px-4 py-4">日期</th><th className="px-4 py-4">時間</th><th className="px-4 py-4">遊戲專線</th><th className="px-4 py-4">滿意度問題1</th><th className="px-4 py-4">滿意度問題2</th><th className="px-4 py-4">對話ID</th></tr></thead>
                     <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
-                      {previewRows.length === 0 ? <tr><td colSpan="10" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewRows.map((r, i) => (
-                        <tr key={i} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
+                      {previewRows.length === 0 ? <tr><td colSpan="8" className="px-6 py-12 text-slate-400">尚無資料</td></tr> : previewPaging.rows.map((r, i) => {
+                        const rowIndex = previewPaging.start + i;
+                        return (
+                        <tr key={`${r.id || rowIndex}-${rowIndex}`} className={`hover:bg-sky-100 ${rowIndex % 2 === 1 ? "bg-sky-50" : "bg-white"}`}>
                           <td className="px-4 py-4">{r.agent}</td><td className="px-4 py-4">{r.shift || "-"}</td><td className="px-4 py-4">{formatCustomDate(r.date)}</td><td className="px-4 py-4">{r.time}</td><td className="px-4 py-4">{r.line}</td><td className="px-4 py-4">{r.q1}</td><td className="px-4 py-4">{r.q2}</td><td className="px-4 py-4">{r.id}</td>
                         </tr>
-                      ))}
+                      )})}
                     </tbody>
                   </table>
                 </div>
+                <PaginationControls total={previewRows.length} page={previewPage} pageSize={previewPageSize} onPageChange={setPreviewPage} onPageSizeChange={setPreviewPageSize} />
               </div>
 
               <div>
@@ -2205,10 +2362,14 @@ function App() {
               <table className="w-full text-left text-[11px] border-collapse font-bold">
                 <thead className="bg-slate-900 text-white sticky top-0 z-20 shadow-lg font-black uppercase"><tr><th className="px-6 py-5">客服名稱</th><th className="px-4 py-5">班別</th><th className="px-4 py-5">日期</th><th className="px-4 py-5">時間</th><th className="px-4 py-5">遊戲專線</th><th className="px-4 py-5">滿意度問題1</th><th className="px-4 py-5">滿意度問題2</th><th className="px-4 py-5">對話ID</th></tr></thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
-                  {detailRows.length === 0 ? <tr><td colSpan="8" className="px-6 py-12 text-center text-slate-400 font-bold">目前沒有雲端明細資料</td></tr> : detailRows.map((d, i) => <tr key={`${d.id}-${i}`} className={`hover:bg-sky-100 ${i % 2 === 1 ? "bg-sky-50" : "bg-white"}`}><td className="px-6 py-4 font-black">{d.agent}</td><td className="px-4 py-4">{d.shift || "-"}</td><td className="px-4 py-4">{formatCustomDate(d.date)}</td><td className="px-4 py-4">{d.time}</td><td className="px-4 py-4">{d.line}</td><td className="px-4 py-4">{d.q1}</td><td className="px-4 py-4">{d.q2}</td><td className="px-4 py-4">{d.id}</td></tr>)}
+                  {detailRows.length === 0 ? <tr><td colSpan="8" className="px-6 py-12 text-center text-slate-400 font-bold">目前沒有雲端明細資料</td></tr> : detailPaging.rows.map((d, i) => {
+                    const rowIndex = detailPaging.start + i;
+                    return <tr key={`${d.id || rowIndex}-${rowIndex}`} className={`hover:bg-sky-100 ${rowIndex % 2 === 1 ? "bg-sky-50" : "bg-white"}`}><td className="px-6 py-4 font-black">{d.agent}</td><td className="px-4 py-4">{d.shift || "-"}</td><td className="px-4 py-4">{formatCustomDate(d.date)}</td><td className="px-4 py-4">{d.time}</td><td className="px-4 py-4">{d.line}</td><td className="px-4 py-4">{d.q1}</td><td className="px-4 py-4">{d.q2}</td><td className="px-4 py-4">{d.id}</td></tr>
+                  })}
                 </tbody>
               </table>
             </div>
+            <PaginationControls total={detailRows.length} page={detailPage} pageSize={detailPageSize} onPageChange={setDetailPage} onPageSizeChange={setDetailPageSize} />
           </div>
         )}
       </div>
