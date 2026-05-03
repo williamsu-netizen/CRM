@@ -33,7 +33,26 @@
   </style>
 </head>
 <body class="bg-slate-100">
-<div id="root"></div>
+<div id="root"><div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f1f5f9;color:#334155;font-family:Microsoft JhengHei,Arial,sans-serif;font-weight:700;">系統載入中...</div></div>
+
+<script>
+window.addEventListener('load', function () {
+  setTimeout(function () {
+    var root = document.getElementById('root');
+    if (!root) return;
+    var text = (root.innerText || '').trim();
+    var stillLoading = text === '系統載入中...' || text === '';
+    if (stillLoading && (!window.React || !window.ReactDOM || !window.Babel)) {
+      root.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f1f5f9;padding:24px;font-family:Microsoft JhengHei,Arial,sans-serif;">' +
+        '<div style="max-width:760px;background:white;border:1px solid #e2e8f0;border-radius:24px;padding:28px;box-shadow:0 10px 25px rgba(15,23,42,.08);color:#334155;line-height:1.8;">' +
+        '<div style="font-size:24px;font-weight:900;margin-bottom:8px;color:#0f172a;">系統套件載入失敗</div>' +
+        '<div style="font-weight:700;">請確認網路可以連到 React / Firebase / ExcelJS CDN，或重新整理頁面。</div>' +
+        '<div style="font-size:13px;color:#64748b;margin-top:12px;">如果你是直接用本機開啟 HTML，請改放到 GitHub Pages 後再開啟。</div>' +
+        '</div></div>';
+    }
+  }, 5000);
+});
+</script>
 
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
@@ -798,11 +817,6 @@ function App() {
   const [previewPeriodYear, setPreviewPeriodYear] = useState("");
   const fileInputRef = useRef(null);
 
-  useEffect(() => {
-    if (window.lucide) {
-      window.requestAnimationFrame(() => window.lucide.createIcons());
-    }
-  }, [activeTab, previewRows.length, detailRows.length, cloudIndex.length]);
 
   useEffect(() => {
     try {
@@ -1691,6 +1705,12 @@ function App() {
   useEffect(() => { setDetailPage(1); }, [detailRows]);
   const previewPaging = useMemo(() => paginateRows(previewRows, previewPage, previewPageSize), [previewRows, previewPage, previewPageSize]);
   const detailPaging = useMemo(() => paginateRows(detailRows, detailPage, detailPageSize), [detailRows, detailPage, detailPageSize]);
+
+  useEffect(() => {
+    if (window.lucide) {
+      window.requestAnimationFrame(() => window.lucide.createIcons());
+    }
+  }, [activeTab, previewRows.length, detailRows.length, cloudIndex.length]);
 
   const previewSummary = useMemo(() => summarizePreviewRows(previewRows), [previewRows]);
   const previewAnalysisRows = useMemo(() => buildSatisfactionAnalysisRows(previewRows), [previewRows]);
