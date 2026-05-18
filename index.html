@@ -1140,6 +1140,87 @@ function TrendTable({ rows, periodList, formatPeriodKeyForDisplay, formatMetricV
   );
 }
 
+
+function DataValidationPanel({ report }) {
+  if (!report) return null;
+
+  const warningItems = report.warnings || [];
+  const weekRows = report.weekStats || [];
+  const monthRows = report.monthStats || [];
+
+  return (
+    <div className="bg-indigo-50 border border-indigo-200 rounded-[28px] p-6 space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-lg font-black text-indigo-900">資料自我驗證報告</div>
+          <div className="text-sm font-bold text-indigo-700 mt-1">{report.sourceName || "目前資料"}</div>
+        </div>
+        <div className={`px-4 py-2 rounded-2xl text-sm font-black ${warningItems.length ? "bg-amber-100 text-amber-700 border border-amber-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>
+          {warningItems.length ? `發現 ${warningItems.length} 項提醒` : "驗證通過"}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="bg-white rounded-2xl border p-4"><div className="text-xs text-slate-400 font-black mb-1">原始資料筆數</div><div className="text-2xl font-black text-slate-800">{report.rawCount}</div></div>
+        <div className="bg-white rounded-2xl border p-4"><div className="text-xs text-slate-400 font-black mb-1">傳入筆數</div><div className="text-2xl font-black text-slate-800">{report.incomingCount}</div></div>
+        <div className="bg-white rounded-2xl border p-4"><div className="text-xs text-slate-400 font-black mb-1">有效資料筆數</div><div className="text-2xl font-black text-slate-800">{report.validCount}</div></div>
+        <div className="bg-white rounded-2xl border p-4"><div className="text-xs text-slate-400 font-black mb-1">目前預覽筆數</div><div className="text-2xl font-black text-slate-800">{report.previewCount}</div></div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm font-bold text-slate-600">
+        <div className="bg-white rounded-2xl border p-4">日期範圍：<span className="text-slate-900 font-black">{report.dateRange || "-"}</span></div>
+        <div className="bg-white rounded-2xl border p-4">排除：非傳入 <span className="font-black">{report.excluded?.notIncoming || 0}</span> 筆</div>
+        <div className="bg-white rounded-2xl border p-4">排除：缺客服名稱 <span className="font-black">{report.excluded?.missingAgent || 0}</span> 筆</div>
+      </div>
+
+      {warningItems.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm font-bold text-amber-800 leading-7">
+          {warningItems.map((w, i) => <div key={i}>⚠️ {w}</div>)}
+        </div>
+      )}
+
+      {monthRows.length > 0 && (
+        <div className="overflow-x-auto custom-scrollbar rounded-2xl border bg-white">
+          <table className="w-full text-center text-sm whitespace-nowrap">
+            <thead className="bg-indigo-900 text-white font-black"><tr><th className="px-4 py-3">月份</th><th className="px-4 py-3">應抓日期</th><th className="px-4 py-3">實際日期範圍</th><th className="px-4 py-3">有效筆數</th><th className="px-4 py-3">狀態</th></tr></thead>
+            <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
+              {monthRows.map((m) => (
+                <tr key={m.monthKey} className={m.ok ? "bg-white" : "bg-amber-50"}>
+                  <td className="px-4 py-3 font-black">{formatMonthDisplay(m.monthKey)}</td>
+                  <td className="px-4 py-3">{m.expectedRange}</td>
+                  <td className="px-4 py-3">{m.actualRange}</td>
+                  <td className="px-4 py-3">{m.validCount}</td>
+                  <td className="px-4 py-3">{m.ok ? "完整月份範圍" : "非完整月份範圍"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {weekRows.length > 0 && (
+        <div className="overflow-x-auto custom-scrollbar rounded-2xl border bg-white">
+          <table className="w-full text-center text-sm whitespace-nowrap">
+            <thead className="bg-indigo-900 text-white font-black"><tr><th className="px-4 py-3">週次</th><th className="px-4 py-3">日期範圍</th><th className="px-4 py-3">原始傳入</th><th className="px-4 py-3">有效資料</th><th className="px-4 py-3">目前預覽</th><th className="px-4 py-3">狀態</th></tr></thead>
+            <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
+              {weekRows.map((w) => (
+                <tr key={w.weekKey} className={w.ok ? "bg-white" : "bg-rose-50"}>
+                  <td className="px-4 py-3 font-black">{formatWeekKeyZh(w.weekKey)}</td>
+                  <td className="px-4 py-3">{w.weekLabel || "-"}</td>
+                  <td className="px-4 py-3">{w.rawIncomingCount}</td>
+                  <td className="px-4 py-3">{w.validCount}</td>
+                  <td className="px-4 py-3">{w.previewCount}</td>
+                  <td className="px-4 py-3">{w.ok ? "正常" : "預覽缺漏"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(!firebaseReady);
@@ -1170,6 +1251,7 @@ function App() {
   const [csvFileName, setCsvFileName] = useState("");
   const [uploadMessage, setUploadMessage] = useState("");
   const [uploadMode, setUploadMode] = useState("auto");
+  const [validationReport, setValidationReport] = useState(null);
 
   const [viewType, setViewType] = useState("weeks");
   const [selectedMetric, setSelectedMetric] = useState("overallVerySatAvg");
@@ -1193,6 +1275,10 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
 
   const fileInputRef = useRef(null);
+
+  const getActiveUser = useCallback((overrideUser = null) => {
+    return overrideUser || user || (firebaseReady && auth ? auth.currentUser : null);
+  }, [user]);
 
   const getAllAgentsFromRules = useCallback((rules = shiftRules) => {
     const set = new Set();
@@ -1399,14 +1485,24 @@ function App() {
   }, []);
 
   const loadCloudBundle = async (opts = { autoPreview: true }) => {
-    if (!firebaseReady || !user || !db) return;
+    const activeUser = getActiveUser(opts.userOverride || null);
+
+    if (!firebaseReady || !db) {
+      setSyncStatus("目前為本機模式");
+      return;
+    }
+
+    if (!activeUser) {
+      setSyncStatus("尚未登入");
+      return;
+    }
 
     const autoPreview = opts.autoPreview !== false;
     const activeShiftRules = opts.shiftRulesOverride || shiftRules;
     const activeEffective = opts.effectiveRulesOverride || effectiveRules;
 
     try {
-      setSyncStatus("雲端資料讀取中...");
+      setSyncStatus(`登入成功，雲端資料讀取中... ${activeUser.email || ""}`);
       const reportsSnap = await db.collection("weekly_call_project_reports").get();
 
       const rawItems = reportsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })).filter((item) => !item.deleted);
@@ -1478,9 +1574,22 @@ function App() {
       const nextMonths = Object.keys(months).sort();
       const nextWeeks = Object.keys(weeks).sort();
 
-      setSelectedYears((prev) => prev.length ? prev.filter((x) => nextYears.includes(x)) : [...nextYears]);
-      setSelectedMonths((prev) => prev.length ? prev.filter((x) => nextMonths.includes(x)) : [...nextMonths]);
-      setSelectedWeeks((prev) => prev.length ? prev.filter((x) => nextWeeks.includes(x)) : [...nextWeeks]);
+      setSelectedYears((prev) => {
+        const kept = prev.filter((x) => nextYears.includes(x));
+        const missing = nextYears.filter((x) => !kept.includes(x));
+        return [...kept, ...missing];
+      });
+      setSelectedMonths((prev) => {
+        const kept = prev.filter((x) => nextMonths.includes(x));
+        const missing = nextMonths.filter((x) => !kept.includes(x));
+        return [...kept, ...missing];
+      });
+      // 修正：雲端重新載入後，自動補齊所有新週次，避免 2026-W17 其實存在但被舊篩選狀態隱藏。
+      setSelectedWeeks((prev) => {
+        const kept = prev.filter((x) => nextWeeks.includes(x));
+        const missing = nextWeeks.filter((x) => !kept.includes(x));
+        return [...kept, ...missing];
+      });
 
       // 修正：通話明細、通話時間、滿意度分析查詢／趨勢分析不依賴目前預覽檔，而是以雲端主資料為準。
       // 雲端讀取完成後，若明細尚未選擇期間，直接帶入最新一週。
@@ -1496,7 +1605,11 @@ function App() {
       }
 
       if (autoPreview && items.length > 0) {
-        const latest = items[0];
+        // v3 修正：不要自動預覽「只有索引、沒有明細 rows」的最新雲端紀錄。
+        // 這種紀錄通常來自重複上傳：validCount 有數字、insertedCount = 0、rows/chunks 為空。
+        // 若直接拿它當最新資料，畫面就會顯示檔名 2026202604.csv 但共 0 筆。
+        const latestWithRows = items.find((item) => (reportRowsMap.get(item.id) || []).length > 0);
+        const latest = latestWithRows || items[0];
         const raw = reportRowsMap.get(latest.id) || [];
 
         const preview = dedupeRows(
@@ -1512,8 +1625,8 @@ function App() {
         setPreviewRows(preview);
         setCsvFileName(latest.fileName || "雲端資料");
         setPreviewMeta({
-          mode: "cloud-latest",
-          title: `最新雲端資料：${latest.fileName || latest.id}`,
+          mode: raw.length ? "cloud-latest-with-rows" : "cloud-latest-metadata-only",
+          title: raw.length ? `最新有明細的雲端資料：${latest.fileName || latest.id}` : `最新雲端資料只有索引：${latest.fileName || latest.id}`,
           weekKeys: Array.from(new Set(preview.map((r) => r.weekKey).filter(Boolean))).sort(),
           monthKeys: Array.from(new Set(preview.map((r) => r.monthKey).filter(Boolean))).sort(),
           yearKeys: Array.from(new Set(preview.map((r) => r.yearKey).filter(Boolean))).sort(),
@@ -1521,10 +1634,37 @@ function App() {
           recordCountBeforeDedupe: raw.length,
           recordCountAfterDedupe: preview.length
         });
-        setUploadMessage(`已自動載入最新雲端資料：${latest.fileName || latest.id}，有效資料 ${preview.length} 筆。`);
+
+        setValidationReport({
+          sourceName: raw.length ? `最新有明細的雲端資料：${latest.fileName || latest.id}` : `最新雲端資料只有索引：${latest.fileName || latest.id}`,
+          rawCount: raw.length,
+          incomingCount: raw.length,
+          validCount: preview.length,
+          previewCount: preview.length,
+          excluded: { notIncoming: 0, missingAgent: 0, missingDate: 0, ineffective: 0 },
+          dateRange: preview.length ? `${formatCustomDate(preview[0].date)}～${formatCustomDate(preview[preview.length - 1].date)}` : "-",
+          weekStats: Array.from(new Set(preview.map((r) => r.weekKey).filter(Boolean))).sort().map((weekKey) => {
+            const weekRows = preview.filter((r) => r.weekKey === weekKey);
+            return { weekKey, weekLabel: weekRows[0]?.weekLabel || "", rawIncomingCount: weekRows.length, validCount: weekRows.length, previewCount: weekRows.length, ok: true };
+          }),
+          monthStats: Array.from(new Set(preview.map((r) => r.monthKey).filter(Boolean))).sort().map((monthKey) => {
+            const monthRows = preview.filter((r) => r.monthKey === monthKey).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+            const expected = getMonthExpectedRange(monthKey);
+            const first = monthRows[0]?.date || "";
+            const last = monthRows[monthRows.length - 1]?.date || "";
+            return { monthKey, expectedRange: expected.label, actualRange: first && last ? `${formatCustomDate(first)}～${formatCustomDate(last)}` : "-", validCount: monthRows.length, ok: first <= expected.start && last >= expected.end };
+          }),
+          warnings: raw.length ? [] : ["這筆雲端紀錄只有索引資料，沒有實際明細 rows。請刪除這筆 insertedCount=0 的雲端紀錄，或重新上傳並同步原始 CSV。"]
+        });
+
+        if (raw.length) {
+          setUploadMessage(`已自動載入最新有明細的雲端資料：${latest.fileName || latest.id}，有效資料 ${preview.length} 筆。`);
+        } else {
+          setUploadMessage(`注意：最新雲端資料「${latest.fileName || latest.id}」只有索引沒有明細，所以目前預覽為 0 筆。請刪除此筆空紀錄後重新同步。`);
+        }
       }
 
-      setSyncStatus(`☁️ 雲端已同步 ✓ ${user.email}`);
+      setSyncStatus(`☁️ 雲端已同步 ✓ ${activeUser.email || ""}`);
     } catch (e) {
       console.error(e);
       setSyncStatus("雲端讀取失敗");
@@ -1552,6 +1692,7 @@ function App() {
       setAuthReady(true);
 
       if (u) {
+        setSyncStatus(`登入成功，雲端資料讀取中... ${u.email || ""}`);
         try {
           let rulesForInitialLoad = shiftRules;
           let effectiveForInitialLoad = effectiveRules;
@@ -1575,11 +1716,12 @@ function App() {
           await loadCloudBundle({
             autoPreview: true,
             shiftRulesOverride: rulesForInitialLoad,
-            effectiveRulesOverride: effectiveForInitialLoad
+            effectiveRulesOverride: effectiveForInitialLoad,
+            userOverride: u
           });
         } catch (e) {
           console.error(e);
-          setSyncStatus("雲端讀取失敗");
+          setSyncStatus(`登入成功，但雲端讀取失敗：${e.message || e}`);
         }
       } else {
         setSyncStatus("尚未登入");
@@ -1587,6 +1729,7 @@ function App() {
         setCloudMasterStore(EMPTY_CLOUD_STORE);
         setPreviewRows([]);
         setPreviewMeta(EMPTY_PREVIEW_META);
+        setValidationReport(null);
       }
     });
 
@@ -1675,6 +1818,123 @@ function App() {
     return dedupeRows(detailRows).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
   };
 
+
+  const getMonthExpectedRange = (monthKey) => {
+    const m = String(monthKey || "").match(/^(\d{4})-(\d{2})$/);
+    if (!m) return { start: "", end: "", label: "" };
+    const y = Number(m[1]);
+    const month = Number(m[2]);
+    const start = `${y}-${String(month).padStart(2, "0")}-01`;
+    const last = new Date(y, month, 0);
+    const end = formatDateKey(last);
+    return { start, end, label: `${formatCustomDate(start)}～${formatCustomDate(end)}` };
+  };
+
+  const buildValidationReport = (rawRows = [], validRows = [], previewRowsForReport = [], sourceName = "目前資料") => {
+    const excluded = { notIncoming: 0, missingAgent: 0, missingDate: 0, ineffective: 0 };
+    const rawWeekMap = {};
+    const validWeekMap = {};
+    const previewWeekMap = {};
+    const monthMap = {};
+    const validDates = [];
+
+    rawRows.forEach((raw) => {
+      const data = getRowValueByAliases(raw);
+      const direction = String(data.direction || "").trim();
+      const agent = String(data.agent || "").trim();
+      const { date, time } = parseDateTimeValue(data.datetime);
+
+      if (direction !== "傳入") {
+        excluded.notIncoming += 1;
+        return;
+      }
+
+      const weekInfo = getWeekInfo(date, time || "00:00:00");
+      if (weekInfo?.weekKey) {
+        if (!rawWeekMap[weekInfo.weekKey]) rawWeekMap[weekInfo.weekKey] = { count: 0, label: weekInfo.weekLabel };
+        rawWeekMap[weekInfo.weekKey].count += 1;
+      }
+
+      if (!agent) excluded.missingAgent += 1;
+      if (!date) excluded.missingDate += 1;
+    });
+
+    validRows.forEach((r) => {
+      if (r.date) validDates.push(r.date);
+      if (r.weekKey) {
+        if (!validWeekMap[r.weekKey]) validWeekMap[r.weekKey] = { count: 0, label: r.weekLabel };
+        validWeekMap[r.weekKey].count += 1;
+      }
+      if (r.monthKey) {
+        if (!monthMap[r.monthKey]) monthMap[r.monthKey] = { dates: [], count: 0 };
+        monthMap[r.monthKey].dates.push(r.date);
+        monthMap[r.monthKey].count += 1;
+      }
+    });
+
+    previewRowsForReport.forEach((r) => {
+      if (r.weekKey) {
+        if (!previewWeekMap[r.weekKey]) previewWeekMap[r.weekKey] = { count: 0, label: r.weekLabel };
+        previewWeekMap[r.weekKey].count += 1;
+      }
+    });
+
+    const allWeekKeys = Array.from(new Set([
+      ...Object.keys(rawWeekMap),
+      ...Object.keys(validWeekMap),
+      ...Object.keys(previewWeekMap)
+    ])).sort();
+
+    const weekStats = allWeekKeys.map((weekKey) => {
+      const rawIncomingCount = rawWeekMap[weekKey]?.count || 0;
+      const validCount = validWeekMap[weekKey]?.count || 0;
+      const previewCount = previewWeekMap[weekKey]?.count || 0;
+      return {
+        weekKey,
+        weekLabel: rawWeekMap[weekKey]?.label || validWeekMap[weekKey]?.label || previewWeekMap[weekKey]?.label || "",
+        rawIncomingCount,
+        validCount,
+        previewCount,
+        ok: validCount === 0 || previewCount > 0
+      };
+    });
+
+    const monthStats = Object.keys(monthMap).sort().map((monthKey) => {
+      const dates = monthMap[monthKey].dates.filter(Boolean).sort();
+      const first = dates[0] || "";
+      const last = dates[dates.length - 1] || "";
+      const expected = getMonthExpectedRange(monthKey);
+      return {
+        monthKey,
+        expectedRange: expected.label,
+        actualRange: first && last ? `${formatCustomDate(first)}～${formatCustomDate(last)}` : "-",
+        validCount: monthMap[monthKey].count,
+        ok: first <= expected.start && last >= expected.end
+      };
+    });
+
+    const warnings = [];
+    const missingWeeks = weekStats.filter((w) => w.validCount > 0 && w.previewCount === 0);
+    if (missingWeeks.length) warnings.push(`有效資料含 ${missingWeeks.map((w) => formatWeekKeyZh(w.weekKey)).join("、")}，但目前預覽沒有顯示。`);
+    monthStats.filter((m) => !m.ok).forEach((m) => warnings.push(`${formatMonthDisplay(m.monthKey)} 目前不是完整月份資料，應抓 ${m.expectedRange}。`));
+    if (excluded.missingAgent > 0) warnings.push(`有 ${excluded.missingAgent} 筆傳入資料缺少客服名稱，已排除統計。`);
+    if (excluded.missingDate > 0) warnings.push(`有 ${excluded.missingDate} 筆傳入資料缺少日期，可能無法判斷週次。`);
+
+    const sortedDates = validDates.filter(Boolean).sort();
+    return {
+      sourceName,
+      rawCount: rawRows.length,
+      incomingCount: rawRows.length - excluded.notIncoming,
+      validCount: validRows.length,
+      previewCount: previewRowsForReport.length,
+      excluded,
+      dateRange: sortedDates.length ? `${formatCustomDate(sortedDates[0])}～${formatCustomDate(sortedDates[sortedDates.length - 1])}` : "-",
+      weekStats,
+      monthStats,
+      warnings
+    };
+  };
+
   const handleDataUpload = async (file) => {
     if (!file) return;
 
@@ -1689,7 +1949,9 @@ function App() {
 
       const weekKeys = Object.keys(weekCounter).sort();
       let mode = uploadMode;
-      if (mode === "auto") mode = weekKeys.length <= 1 ? "single_week" : "multi_week";
+      // 修正：只要檔案跨多週，就一律整批保留，避免 4 月整月資料被單週模式切掉而漏掉 2026-W17。
+      if (weekKeys.length > 1) mode = "multi_week";
+      else if (mode === "auto") mode = "single_week";
 
       let rows = rowsAll;
       if (mode === "single_week") {
@@ -1709,7 +1971,8 @@ function App() {
         recordCountBeforeDedupe: raw.length,
         recordCountAfterDedupe: rows.length
       });
-      setUploadMessage(`檔案「${file.name}」讀取完成，共 ${rows.length} 筆有效資料。${mode === "single_week" ? "目前為單週模式。" : "目前為整批模式。"}`);
+      setValidationReport(buildValidationReport(raw, rowsAll, rows, file.name || "上傳資料"));
+      setUploadMessage(`檔案「${file.name}」讀取完成，共 ${rows.length} 筆有效資料。${mode === "single_week" ? "目前為單週模式。" : "目前為整批模式；已保留所有週次。"}`);
       setActiveTab("weekly");
     } catch (e) {
       console.error(e);
@@ -1718,7 +1981,8 @@ function App() {
   };
 
   const saveCurrentUploadToCloud = async () => {
-    if (!firebaseReady || !user || !db) return alert("目前未登入，無法同步到雲端。");
+    const activeUser = getActiveUser();
+    if (!firebaseReady || !activeUser || !db) return alert("目前未登入，無法同步到雲端。");
     if (!previewRows.length) return alert("目前沒有可同步的資料。");
     if (!window.confirm("是否要將目前資料同步到雲端？")) return;
 
@@ -1726,8 +1990,16 @@ function App() {
       setSyncStatus("同步雲端中...");
       const snap = await db.collection("weekly_call_project_reports").get();
       let cloudRows = [];
-      for (const doc of snap.docs) {
-        const rows = await fetchRowsFromReportDoc(doc);
+
+      // v4 修正：重複比對只看「目前有效、未刪除」的雲端資料。
+      // Firestore 的刪除是軟刪除 deleted=true；如果把已刪除資料也拿來比對，
+      // 會出現「畫面沒有資料，但同步時卻判斷 1815 筆都重複」的狀況。
+      const activeDocs = snap.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .filter((item) => !item.deleted);
+
+      for (const item of activeDocs) {
+        const rows = await fetchRowsFromReportDoc(item);
         cloudRows = cloudRows.concat(rows);
       }
 
@@ -1743,6 +2015,17 @@ function App() {
         if (cloudKeys.has(key)) duplicateWithCloud += 1;
         else newRows.push(row);
       });
+
+      // v3 修正：全部都是重複資料時，不再建立「validCount 有值但 rows 為空」的雲端紀錄。
+      // 這種空紀錄會造成登入後自動載入最新資料時，畫面顯示檔名正確但共 0 筆。
+      if (newRows.length === 0) {
+        await loadCloudBundle({ autoPreview: true });
+        setUploadMessage(`資料已存在目前有效的雲端資料中，本次沒有新增，也不建立空白雲端紀錄。重複 ${duplicateWithCloud} 筆。`);
+        alert(`資料已存在目前有效的雲端資料中，本次沒有新增，也不建立空白雲端紀錄。重複 ${duplicateWithCloud} 筆。
+
+如果查詢畫面仍看不到資料，請到「雲端已存資料」按重新整理，並確認該筆不是已刪除或只有索引的紀錄。`);
+        return;
+      }
 
       const docId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const weekKeys = Array.from(new Set(previewUnique.map((r) => r.weekKey).filter(Boolean))).sort();
@@ -1763,7 +2046,7 @@ function App() {
         yearKeys,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         createdAtMillis: Date.now(),
-        createdBy: user.email,
+        createdBy: activeUser.email,
         rowStorage: rowChunks.length > 1 ? "chunks" : "inline",
         rowChunkCount: rowChunks.length,
         rows: rowChunks.length <= 1 ? newRows : []
@@ -1800,6 +2083,10 @@ function App() {
         const data = { id: doc.id, ...doc.data() };
         if (!firstDocData) firstDocData = data;
         rows = rows.concat(await fetchRowsFromReportDoc(data));
+      }
+
+      if (!rows.length) {
+        alert("你勾選的雲端資料只有索引，沒有實際明細 rows，所以載入後會是 0 筆。請刪除此筆空紀錄，重新上傳 CSV 並同步。");
       }
 
       rows = dedupeRows(
@@ -1954,19 +2241,73 @@ function App() {
     loadCloudBundle({ autoPreview: false });
   }, [activeTab, user]);
 
+  // v5 修正：長期歷史總覽／趨勢分析必須完全依目前勾選條件即時計算。
+  // 舊版在「月／年」模式會直接使用預先算好的整月／整年資料，導致即使只勾選 1 週或 2 週，
+  // 下方月表／趨勢仍顯示整月總數，看起來條件有變但數據不變。
+  // 這裡改成：先依 年／月／週 三層勾選條件篩出 rows，再依目前 viewType 重新分組彙總。
   const periodList = useMemo(() => {
-    const raw = cloudMasterStore[viewType] || {};
-    return Object.keys(raw)
-      .sort()
-      .filter((key) => {
-        if (viewType === "years") return selectedYears.includes(key);
-        if (viewType === "months") return selectedYears.includes(key.slice(0, 4)) && selectedMonths.includes(key);
+    const sourceRows = cloudMasterStore.rows || [];
+    if (!sourceRows.length) return [];
+    if (!selectedYears.length || !selectedMonths.length || !selectedWeeks.length) return [];
 
-        const item = raw[key];
-        return item && selectedYears.includes(item.year) && selectedMonths.includes(item.month) && selectedWeeks.includes(key);
-      })
-      .map((key) => raw[key]);
-  }, [cloudMasterStore, viewType, selectedYears, selectedMonths, selectedWeeks]);
+    const filteredRows = sourceRows.filter((row) => {
+      return selectedYears.includes(row.yearKey)
+        && selectedMonths.includes(row.monthKey)
+        && selectedWeeks.includes(row.weekKey);
+    });
+
+    const groups = {};
+
+    filteredRows.forEach((row) => {
+      let key = row.weekKey;
+      if (viewType === "months") key = row.monthKey;
+      if (viewType === "years") key = row.yearKey;
+      if (!key) return;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(row);
+    });
+
+    return Object.keys(groups)
+      .sort()
+      .map((key) => {
+        const rows = groups[key];
+        const first = rows[0] || {};
+
+        if (viewType === "weeks") {
+          return buildPeriodSummary(
+            rows,
+            key,
+            first.weekLabel || "",
+            { year: first.yearKey, month: first.monthKey, weekStart: first.weekStart, weekEnd: first.weekEnd },
+            shiftRules,
+            effectiveRules,
+            "weeks"
+          );
+        }
+
+        if (viewType === "months") {
+          return buildPeriodSummary(
+            rows,
+            key,
+            key,
+            { year: first.yearKey, month: key },
+            shiftRules,
+            effectiveRules,
+            "months"
+          );
+        }
+
+        return buildPeriodSummary(
+          rows,
+          key,
+          key,
+          { year: key },
+          shiftRules,
+          effectiveRules,
+          "years"
+        );
+      });
+  }, [cloudMasterStore.rows, viewType, selectedYears, selectedMonths, selectedWeeks, buildPeriodSummary, shiftRules, effectiveRules]);
 
   const availableAgents = useMemo(() => {
     const set = new Set();
@@ -2068,7 +2409,10 @@ function App() {
   const detailRows = useMemo(() => {
     let rows = [];
     if (detailMode === "weeks") rows = cloudMasterStore.detailByWeek?.[detailKey]?.rows || [];
-    else if (detailMode === "months") rows = (cloudMasterStore.rows || []).filter((r) => r.monthKey === detailKey);
+    else if (detailMode === "months") {
+      const expected = getMonthExpectedRange(detailKey);
+      rows = (cloudMasterStore.rows || []).filter((r) => r.date >= expected.start && r.date <= expected.end);
+    }
     else rows = (cloudMasterStore.rows || []).filter((r) => r.yearKey === detailKey);
     return rows.slice().sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
   }, [cloudMasterStore, detailMode, detailKey]);
@@ -2185,9 +2529,17 @@ function App() {
     }
 
     try {
-      await auth.signInWithEmailAndPassword(email, password);
+      setSyncStatus("登入中...");
+      const cred = await auth.signInWithEmailAndPassword(email, password);
       clearLoginFailures();
       setLoginLockText("");
+      setUser(cred.user);
+      setSyncStatus(`登入成功，雲端資料讀取中... ${cred.user?.email || ""}`);
+      // 保險機制：部分瀏覽器 onAuthStateChanged 觸發較慢時，登入成功後仍會主動抓一次雲端資料。
+      window.setTimeout(() => {
+        const current = auth.currentUser || cred.user;
+        if (current) loadCloudBundle({ autoPreview: true, userOverride: current });
+      }, 0);
     } catch (error) {
       const next = recordLoginFailure();
       const remain = Math.max(0, SECURITY_CONFIG.maxLoginFailures - Number(next.failures || 0));
@@ -2320,7 +2672,7 @@ function App() {
 
           <div className="flex gap-3 flex-wrap items-center justify-end">
             <span className="text-sm font-bold text-slate-400">{syncStatus}</span>
-            {user && <span className="text-sm bg-slate-200 px-3 py-1 rounded-full font-bold">{user.email}</span>}
+            {getActiveUser() && <span className="text-sm bg-slate-200 px-3 py-1 rounded-full font-bold">{getActiveUser().email}</span>}
 
             <button title="重新從雲端抓資料" onClick={() => loadCloudBundle({ autoPreview: true })} className="w-11 h-11 rounded-2xl bg-indigo-600 text-white hover:bg-indigo-700 flex items-center justify-center shadow-sm"><Icon name="refresh" size={18} /></button>
             <button title="同步雲端" onClick={saveCurrentUploadToCloud} className="w-11 h-11 rounded-2xl bg-emerald-600 text-white hover:bg-emerald-700 flex items-center justify-center shadow-sm"><Icon name="upload" size={18} /></button>
@@ -2383,6 +2735,7 @@ function App() {
               </div>
               <button onClick={() => exportRowsBundleToExcel(previewRows, " 預覽查詢上傳資料與通話時間")} className="bg-emerald-600 text-white px-5 py-2.5 rounded-2xl font-bold hover:bg-emerald-700 flex items-center gap-2"><Icon name="download" size={18} />匯出 Excel</button>
             </div>
+            <DataValidationPanel report={validationReport} />
             <div>
               <div className="text-lg font-black text-slate-800 mb-4">一、通話明細</div>
               <TableRows rows={previewPaging.rows} start={previewPaging.start} />
@@ -2552,6 +2905,11 @@ function App() {
             </div>
 
             <div className="text-sm font-bold text-slate-500">共 {detailRows.length} 筆</div>
+            {detailMode === "months" && detailKey && (
+              <div className="bg-blue-50 border border-blue-200 rounded-2xl px-5 py-4 text-sm font-bold text-blue-800">
+                月份查詢已固定使用完整日期區間：{getMonthExpectedRange(detailKey).label}，不再受到週次勾選影響。
+              </div>
+            )}
             <TableRows rows={detailPaging.rows} start={detailPaging.start} />
             <PaginationControls total={detailRows.length} page={detailPage} pageSize={detailPageSize} onPageChange={setDetailPage} onPageSizeChange={setDetailPageSize} />
 
