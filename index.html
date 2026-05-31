@@ -2026,13 +2026,39 @@ function App() {
     const sourceRows = cloudMasterStore.rows || [];
     if (!sourceRows.length) return [];
     if (!selectedYears.length || !selectedMonths.length || !selectedWeeks.length) return [];
-    const filteredRows = sourceRows.filter((row) => selectedYears.includes(row.yearKey) && selectedMonths.includes(row.monthKey) && selectedWeeks.includes(row.weekKey));
+
+    const filteredRows = sourceRows.filter((row) => {
+      if (viewType === "weeks") {
+        // 週模式：依 weekKey 過濾（週次篩選器選哪幾週）
+        return selectedYears.includes(row.yearKey)
+          && selectedMonths.includes(row.monthKey)
+          && selectedWeeks.includes(row.weekKey);
+      }
+      if (viewType === "months") {
+        // 月模式：依 date 的實際月份過濾，避免跨週資料被漏算
+        const calMonth = getCalendarMonthKey(row.date);
+        const calYear = getCalendarYearKey(row.date);
+        return selectedYears.includes(calYear) && selectedMonths.includes(calMonth);
+      }
+      // 年模式：依 date 的實際年份過濾
+      const calYear = getCalendarYearKey(row.date);
+      return selectedYears.includes(calYear);
+    });
+
     const groups = {};
-    filteredRows.forEach((row) => { let key = row.weekKey; if (viewType === "months") key = row.monthKey; if (viewType === "years") key = row.yearKey; if (!key) return; if (!groups[key]) groups[key] = []; groups[key].push(row); });
+    filteredRows.forEach((row) => {
+      let key = row.weekKey;
+      if (viewType === "months") key = getCalendarMonthKey(row.date);
+      if (viewType === "years") key = getCalendarYearKey(row.date);
+      if (!key) return;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(row);
+    });
+
     return Object.keys(groups).sort().map((key) => {
       const rows = groups[key], first = rows[0] || {};
       if (viewType === "weeks") return buildPeriodSummary(rows, key, first.weekLabel || "", { year: first.yearKey, month: first.monthKey, weekStart: first.weekStart, weekEnd: first.weekEnd }, shiftRules, effectiveRules, "weeks");
-      if (viewType === "months") return buildPeriodSummary(rows, key, key, { year: first.yearKey, month: key }, shiftRules, effectiveRules, "months");
+      if (viewType === "months") return buildPeriodSummary(rows, key, key, { year: getCalendarYearKey(first.date), month: key }, shiftRules, effectiveRules, "months");
       return buildPeriodSummary(rows, key, key, { year: key }, shiftRules, effectiveRules, "years");
     });
   }, [cloudMasterStore.rows, viewType, selectedYears, selectedMonths, selectedWeeks, buildPeriodSummary, shiftRules, effectiveRules]);
@@ -2463,4 +2489,5 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
 </html>
+
 
