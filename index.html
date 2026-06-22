@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://www.gstatic.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebaseinstallations.googleapis.com wss://*.firebaseio.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebaseinstallations.googleapis.com wss://*.firebaseio.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests" />
   <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(), payment=()" />
   <meta name="referrer" content="no-referrer" />
   <title>客服電話紀錄長期觀察系統</title>
@@ -15,7 +15,6 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
   <link rel="stylesheet" href="./assets/tailwind-static.css" />
 
   <style>
@@ -92,7 +91,7 @@ window.addEventListener('load', function () {
         '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f1f5f9;padding:24px;font-family:Microsoft JhengHei,Arial,sans-serif;">' +
         '<div style="max-width:760px;background:white;border:1px solid #e2e8f0;border-radius:24px;padding:28px;box-shadow:0 10px 25px rgba(15,23,42,.08);color:#334155;line-height:1.8;">' +
         '<div style="font-size:24px;font-weight:900;margin-bottom:8px;color:#0f172a;">系統套件載入失敗</div>' +
-        '<div style="font-weight:700;">請確認網路可以連到 React / Firebase / ExcelJS CDN，或重新整理頁面。</div>' +
+        '<div style="font-weight:700;">請確認網路可以連到 React / Firebase / XLSX CDN，或重新整理頁面。</div>' +
         '<div style="font-size:13px;color:#64748b;margin-top:12px;">如果你是直接用本機開啟 HTML，請改放到 GitHub Pages 後再開啟。</div>' +
         '</div></div>';
     }
@@ -2072,37 +2071,43 @@ function App() {
     const exportRowsBundleToExcel = async (rows, filenamePrefix = "資料匯出") => {
         if (!rows.length)
             return alert("目前沒有資料可以匯出。");
-        if (!window.ExcelJS)
-            return alert("Excel 匯出模組尚未載入完成。");
+        if (!window.XLSX)
+            return alert("Excel 匯出模組尚未載入完成，請重新整理頁面後再試。");
         try {
-            const workbook = new window.ExcelJS.Workbook();
-            const lightBlueFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0F2FE" } };
-            const headerFill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F172A" } };
-            const headerFont = { color: { argb: "FFFFFFFF" }, bold: true };
+            const workbook = window.XLSX.utils.book_new();
+            const safeSheetName = (name) => String(name || "Sheet").replace(/[\\/?*\[\]:]/g, "").slice(0, 31) || "Sheet";
+            const setWorksheetFormat = (sheet, rowCount, colCount, percentColumns = []) => {
+                sheet["!cols"] = Array.from({ length: colCount }, () => ({ wch: 18 }));
+                if (rowCount > 0 && colCount > 0) {
+                    const range = window.XLSX.utils.encode_range({
+                        s: { r: 0, c: 0 },
+                        e: { r: rowCount - 1, c: colCount - 1 }
+                    });
+                    sheet["!autofilter"] = { ref: range };
+                }
+                for (let r = 1; r < rowCount; r++) {
+                    percentColumns.forEach((colNumber) => {
+                        const cellAddress = window.XLSX.utils.encode_cell({ r, c: colNumber - 1 });
+                        if (sheet[cellAddress]) {
+                            sheet[cellAddress].t = "n";
+                            sheet[cellAddress].z = "0.00%";
+                        }
+                    });
+                }
+            };
             const createSheet = (sheetName, headers, dataRows, percentColumns = []) => {
-                const sheet = workbook.addWorksheet(sheetName);
-                sheet.addRow(headers);
-                sheet.getRow(1).eachCell((cell) => { cell.fill = headerFill; cell.font = headerFont; cell.alignment = { horizontal: "center", vertical: "middle" }; });
-                dataRows.forEach((rowData, index) => { const row = sheet.addRow(rowData); if (index % 2 === 1)
-                    row.eachCell((cell) => { cell.fill = lightBlueFill; }); row.eachCell((cell, colNumber) => { cell.alignment = { horizontal: "center", vertical: "middle" }; if (percentColumns.includes(colNumber))
-                    cell.numFmt = "0.00%"; }); });
-                sheet.columns.forEach((column) => { column.width = 18; });
-                return sheet;
+                const aoa = [headers, ...dataRows];
+                const sheet = window.XLSX.utils.aoa_to_sheet(aoa);
+                setWorksheetFormat(sheet, aoa.length, headers.length, percentColumns);
+                window.XLSX.utils.book_append_sheet(workbook, sheet, safeSheetName(sheetName));
             };
             createSheet("客服通話明細表", ["客服名稱", "班別", "日期", "時間", "遊戲專線", "滿意度問題1", "滿意度問題2", "對話ID"], rows.map((r) => [r.agent, r.shift || "", formatCustomDate(r.date), r.time, r.line, r.q1, r.q2, r.id]));
             createSheet("總處理時間", SUMMARY_HEADERS, buildSummaryRowsFromSource(rows, "handle").map((r) => SUMMARY_HEADERS.map((h) => ["客服名稱", "班別"].includes(h) ? (r[h] || "") : Number(formatToHours(r[h])))));
             createSheet("總發話時間", SUMMARY_HEADERS, buildSummaryRowsFromSource(rows, "speak").map((r) => SUMMARY_HEADERS.map((h) => ["客服名稱", "班別"].includes(h) ? (r[h] || "") : Number(formatToHours(r[h])))));
             const analysisHeaders = ["客服名稱", "班別", "總通話數", "人員非常滿意度(Q1)", "人員調查率(Q1)", "問題非常滿意度(Q2)", "問題調查率(Q2)", "整體非常滿意度平均", "整體調查率平均"];
             createSheet("滿意度分析", analysisHeaders, buildSatisfactionAnalysisRows(rows).map((r) => [r["客服名稱"], r["班別"], r["總通話數"], r["人員非常滿意度(Q1)"], r["人員調查率(Q1)"], r["問題非常滿意度(Q2)"], r["問題調查率(Q2)"], r["整體非常滿意度平均"], r["整體調查率平均"]]), [4, 5, 6, 7, 8, 9]);
-            const buffer = await workbook.xlsx.writeBuffer();
-            const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
             const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-            a.download = `${filenamePrefix}_${today}.xlsx`;
-            a.click();
-            URL.revokeObjectURL(url);
+            window.XLSX.writeFile(workbook, `${filenamePrefix}_${today}.xlsx`, { bookType: "xlsx", compression: true });
         }
         catch (err) {
             console.error("Excel 匯出失敗:", err);
