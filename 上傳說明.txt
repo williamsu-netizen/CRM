@@ -1,0 +1,10 @@
+上傳位置：GitHub repo「CRM」根目錄
+正式網址：https://williamsu-netizen.github.io/CRM/
+
+需要上傳：
+1. index.html
+2. assets/tailwind-static.css
+3. tailwind-build-tools/（建議保留，未來重新編譯 CSS 使用）
+
+Firebase API Key HTTP referrer 建議：
+https://williamsu-netizen.github.io/CRM/*
