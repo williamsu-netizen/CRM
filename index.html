@@ -167,13 +167,57 @@ const formatDateKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padS
 const formatCustomDate = (dateStr) => { if (!dateStr)
     return ""; const parts = String(dateStr).split(/[-/]/); if (parts.length >= 3)
     return `${parts[0]}/${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`; return dateStr; };
-const formatWeekKeyZh = (weekKey) => { const m = String(weekKey || "").match(/^(\d{4})-W(\d{2})$/); if (!m)
-    return weekKey || ""; return `${m[1]}年第${parseInt(m[2], 10)}週`; };
-const formatWeekDisplay = (weekKey, weekLabel = "") => { const zh = formatWeekKeyZh(weekKey); if (!weekLabel)
-    return zh; return `${zh}（${String(weekLabel).replace(/\s*~\s*/g, "～")}）`; };
+const getWeekRangeLabelFromKey = (weekKey) => {
+    const m = String(weekKey || "").match(/^(\d{4})-W(\d{2})$/);
+    if (!m)
+        return "";
+    const year = Number(m[1]);
+    const weekNo = Number(m[2]);
+    const jan4 = new Date(year, 0, 4);
+    const jan4Day = jan4.getDay() || 7;
+    const firstWeekMonday = new Date(jan4);
+    firstWeekMonday.setDate(jan4.getDate() - jan4Day + 1);
+    const monday = new Date(firstWeekMonday);
+    monday.setDate(firstWeekMonday.getDate() + (weekNo - 1) * 7);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return `${monday.getFullYear()}/${monday.getMonth() + 1}/${monday.getDate()}～${sunday.getFullYear()}/${sunday.getMonth() + 1}/${sunday.getDate()}`;
+};
+const normalizeWeekLabelRange = (weekLabel = "") => String(weekLabel || "").trim().replace(/\s*~\s*/g, "～");
+const formatWeekKeyZh = (weekKey) => {
+    const m = String(weekKey || "").match(/^(\d{4})-W(\d{2})$/);
+    if (!m)
+        return weekKey || "";
+    const range = getWeekRangeLabelFromKey(weekKey);
+    return `${m[1]}年第${parseInt(m[2], 10)}週${range ? `（${range}）` : ""}`;
+};
+const formatWeekDisplay = (weekKey, weekLabel = "") => {
+    const zh = formatWeekKeyZh(weekKey);
+    const range = normalizeWeekLabelRange(weekLabel) || getWeekRangeLabelFromKey(weekKey);
+    if (!range || zh.includes("（"))
+        return zh;
+    return `${zh}（${range}）`;
+};
 const formatMonthDisplay = (monthKey = "") => { const m = String(monthKey || "").match(/^(\d{4})-(\d{2})$/); if (!m)
     return monthKey || ""; return `${m[1]}年${m[2]}月`; };
 const formatYearDisplay = (yearKey = "") => yearKey ? `${yearKey}年` : "";
+const runWeeklyRangeSelfCheck = (rows = []) => {
+    const issues = [];
+    const groups = {};
+    (rows || []).forEach((row) => {
+        if (!row || !row.weekKey)
+            return;
+        if (!groups[row.weekKey])
+            groups[row.weekKey] = new Set();
+        if (row.monthKey)
+            groups[row.weekKey].add(row.monthKey);
+    });
+    Object.entries(groups).forEach(([weekKey, monthSet]) => {
+        if (monthSet.size > 1)
+            issues.push(`${formatWeekDisplay(weekKey)} 橫跨 ${Array.from(monthSet).join("、")}，週統計已改為只依 weekKey 計算，避免跨月漏算。`);
+    });
+    return issues;
+};
 const getLoginLockState = () => { try {
     const raw = localStorage.getItem(LOGIN_LOCK_KEY);
     if (!raw)
@@ -1698,6 +1742,9 @@ function App() {
             Object.entries(monthGroups).forEach(([key, rows]) => { const first = rows[0]; months[key] = buildPeriodSummary(rows, key, key, { year: first.yearKey, month: key }, activeShiftRules, activeEffective, "months"); });
             Object.entries(yearGroups).forEach(([key, rows]) => { years[key] = buildPeriodSummary(rows, key, key, { year: key }, activeShiftRules, activeEffective, "years"); });
             setCloudMasterStore({ rows: allRows, weeks, months, years, detailByWeek });
+            const weeklySelfCheckIssues = runWeeklyRangeSelfCheck(allRows);
+            if (weeklySelfCheckIssues.length)
+                console.info("週次跨月自我檢測：", weeklySelfCheckIssues);
             const nextYears = Object.keys(years).sort();
             const nextMonths = Object.keys(months).sort();
             const nextWeeks = Object.keys(weeks).sort();
@@ -2156,8 +2203,8 @@ function App() {
         setSelectedYears([...allYears]); }, [allYears]);
     useEffect(() => { const months = allMonths.filter((m) => selectedYears.length === 0 || selectedYears.includes(m.slice(0, 4))); if (months.length && selectedMonths.length === 0)
         setSelectedMonths([...months]); }, [allMonths, selectedYears]);
-    useEffect(() => { const weeks = allWeeks.filter((w) => { var _a; const item = (_a = cloudMasterStore.weeks) === null || _a === void 0 ? void 0 : _a[w]; return item && (selectedYears.length ? selectedYears.includes(item.year) : true) && (selectedMonths.length ? selectedMonths.includes(item.month) : true); }); if (weeks.length && selectedWeeks.length === 0)
-        setSelectedWeeks([...weeks]); }, [allWeeks, selectedYears, selectedMonths]);
+    useEffect(() => { const weeks = allWeeks.filter((w) => { var _a; const item = (_a = cloudMasterStore.weeks) === null || _a === void 0 ? void 0 : _a[w]; return item && (selectedYears.length ? selectedYears.includes(item.year) : true); }); if (weeks.length && selectedWeeks.length === 0)
+        setSelectedWeeks([...weeks]); }, [allWeeks, selectedYears]);
     useEffect(() => { if (!detailKey) {
         if (detailMode === "weeks" && allWeeks.length)
             setDetailKey(allWeeks[allWeeks.length - 1]);
@@ -2170,14 +2217,16 @@ function App() {
         const sourceRows = cloudMasterStore.rows || [];
         if (!sourceRows.length)
             return [];
-        if (!selectedYears.length || !selectedMonths.length || !selectedWeeks.length)
+        if (viewType === "weeks" && !selectedWeeks.length)
+            return [];
+        if (viewType === "months" && (!selectedYears.length || !selectedMonths.length))
+            return [];
+        if (viewType === "years" && !selectedYears.length)
             return [];
         const filteredRows = sourceRows.filter((row) => {
             if (viewType === "weeks") {
-                // 週模式：依 weekKey 過濾（週次篩選器選哪幾週）
-                return selectedYears.includes(row.yearKey)
-                    && selectedMonths.includes(row.monthKey)
-                    && selectedWeeks.includes(row.weekKey);
+                // 週模式只依 weekKey 過濾。不可再用 monthKey，避免 6/29～7/5 這種跨月週漏算 7 月資料。
+                return selectedWeeks.includes(row.weekKey);
             }
             if (viewType === "months") {
                 // 月模式：依 date 的實際月份過濾，避免跨週資料被漏算
@@ -2481,6 +2530,9 @@ function App() {
                                     React.createElement("path", { d: "M12 15V3" })),
                                 "\u532F\u51FA Excel"),
                         ] }),
+                    detailMode === "weeks" && detailKey && (React.createElement("div", { style: { background: "#eff6ff", border: "0.5px solid #bfdbfe", borderRadius: "8px", padding: "10px 16px", fontSize: "12px", color: "#1d4ed8" } },
+                        "週次查詢使用完整日期區間：",
+                        formatWeekDisplay(detailKey, (((cloudMasterStore.weeks || {})[detailKey] || {}).periodLabel || "")))),
                     detailMode === "months" && detailKey && (React.createElement("div", { style: { background: "#eff6ff", border: "0.5px solid #bfdbfe", borderRadius: "8px", padding: "10px 16px", fontSize: "12px", color: "#1d4ed8" } },
                         "\u6708\u4EFD\u67E5\u8A62\u4F7F\u7528\u5B8C\u6574\u65E5\u671F\u5340\u9593\uFF1A",
                         getMonthExpectedRange(detailKey).label)),
