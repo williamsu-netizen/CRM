@@ -36,7 +36,7 @@
     .tr-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;font-size:12px;cursor:pointer;border:0.5px solid transparent;user-select:none;font-family:inherit}
     .tr-chip.off{background:#f1f5f9;color:#64748b;border-color:#e2e8f0}
     /* tr-pcheck removed — replaced by inline shortcut button styles */
-    .tr-mini-btn{font-size:11px;padding:2px 9px;border-radius:5px;border:0.5px solid #e2e8f0;background:transparent;cursor:pointer;color:#64748b;font-family:inherit}
+    .tr-mini-btn{font-size:11px;padding:6px 12px;min-height:32px;border-radius:5px;border:0.5px solid #e2e8f0;background:transparent;cursor:pointer;color:#64748b;font-family:inherit}
     .tr-mini-btn:hover{background:#f1f5f9}
     .tr-rank-row{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px}
     .tr-rank-row:hover{background:#f1f5f9}
@@ -44,6 +44,33 @@
     .tr-shift-pill{font-size:11px;padding:2px 7px;border-radius:10px;font-weight:600;white-space:nowrap}
     .tr-fbox{background:#f8fafc;border-radius:8px;padding:10px 12px}
     .tr-kpi{background:#f1f5f9;border-radius:8px;padding:10px 12px}
+    .tr-kpi-row{display:grid;grid-template-columns:repeat(5, minmax(0,1fr));gap:10px}
+    .rwd-multi-col{display:grid}
+    .app-topbar-actions{flex-wrap:wrap;justify-content:flex-end;row-gap:6px}
+
+    /* ── Responsive layout ── */
+    @media (max-width: 1280px) {
+      .tr-kpi-row{grid-template-columns:repeat(3, minmax(0,1fr))}
+    }
+    @media (max-width: 1024px) {
+      .app-main{grid-template-columns:1fr !important}
+      .app-sidebar{flex-direction:row !important;flex-wrap:wrap;border-right:none !important;border-bottom:0.5px solid #e2e8f0;padding:10px !important}
+      .app-sidebar-btn{width:auto !important}
+      .app-topbar{height:auto !important;min-height:56px;flex-wrap:wrap;padding:8px 16px !important;row-gap:8px}
+      .rwd-split{grid-template-columns:1fr !important}
+      .rwd-split > div:first-child{border-right:none !important;border-bottom:0.5px solid #f1f5f9}
+      .tr-kpi-row{grid-template-columns:repeat(2, minmax(0,1fr))}
+      .rwd-multi-col{grid-template-columns:repeat(2, minmax(0,1fr)) !important}
+    }
+    @media (max-width: 640px) {
+      table{font-size:12px}
+      .tr-ptab,.tr-chip{padding:6px 12px;min-height:30px}
+      .tr-kpi-row{grid-template-columns:1fr}
+      .app-syncstatus{display:none}
+    }
+    @media (max-width: 480px) {
+      .rwd-multi-col{grid-template-columns:1fr !important}
+    }
   </style>
 </head>
 <body class="bg-slate-100">
@@ -128,6 +155,13 @@ const EMPTY_SHIFT_RULES = { default: { "早班": [], "中班": [], "晚班": [] 
 const EMPTY_EFFECTIVE_RULES = { "周明瑝": { start: "2025-W09", end: "2025-W35", note: "第35週後不再此單位" } };
 const EMPTY_CLOUD_STORE = { rows: [], weeks: {}, months: {}, years: {}, detailByWeek: {} };
 const EMPTY_PREVIEW_META = { mode: "none", title: "尚未載入資料", weekKeys: [], monthKeys: [], yearKeys: [], sourceCount: 0, recordCountBeforeDedupe: 0, recordCountAfterDedupe: 0 };
+const EMPTY_EVENT_LIST = [];
+const EVENT_TYPES = [
+    { key: "onboarding", label: "新人上線", color: "#2563eb" },
+    { key: "training", label: "教育訓練", color: "#7c3aed" },
+    { key: "incident", label: "系統異常", color: "#dc2626" },
+    { key: "other", label: "其他", color: "#64748b" },
+];
 const SUMMARY_HEADERS = ["客服名稱", "班別", "GT專線", "儲值專線", "GT+儲值專線", "滿貫專線", "金好運專線", "總計"];
 const VALID_SURVEY = ["非常滿意", "尚可", "非常不滿意"];
 const HISTORY_METRICS = [
@@ -155,7 +189,6 @@ const TREND_AGENT_COLORS = [
     { color: "#5F5E5A", bg: "#F1EFE8", tc: "#2C2C2A" },
 ];
 const TREND_DASH_PATTERNS = [[], [6, 3], [3, 3], [8, 3, 2, 3], [4, 2], [10, 3], [2, 2], [7, 2, 2, 2]];
-const METRIC_IS_PCT = { overallVerySatAvg: true, overallSurAvg: true, q1VerySatRate: true, q1SurRate: true, q2VerySatRate: true, q2SurRate: true, totalCalls: false, "GT專線": false, "儲值專線": false, "GT+儲値専線": false, "滿貫專線": false, "金好運專線": false };
 const formatPercent = (n) => `${Number(n || 0).toFixed(2)}%`;
 const formatToHours = (seconds) => (Number(seconds || 0) / 3600).toFixed(2);
 const normalizeMonthKey = (value) => { if (!value)
@@ -273,6 +306,17 @@ const getCalendarMonthKey = (dateStr) => { if (!dateStr)
     return ""; const safe = String(dateStr).replace(/\//g, "-"); const m = safe.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); return m ? `${m[1]}-${String(m[2]).padStart(2, "0")}` : ""; };
 const getCalendarYearKey = (dateStr) => { if (!dateStr)
     return ""; const safe = String(dateStr).replace(/\//g, "-"); const m = safe.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); return m ? m[1] : ""; };
+const getPeriodKeyForDate = (dateStr, viewType) => {
+    if (!dateStr)
+        return "";
+    if (viewType === "weeks") {
+        const info = getWeekInfo(dateStr);
+        return info ? info.weekKey : "";
+    }
+    if (viewType === "months")
+        return getCalendarMonthKey(dateStr);
+    return getCalendarYearKey(dateStr);
+};
 const weekKeyToNumber = (weekKey) => { const m = String(weekKey || "").match(/^(\d{4})-W(\d{2})$/); if (!m)
     return null; return Number(m[1]) * 100 + Number(m[2]); };
 const monthKeyToNumber = (monthKey) => { const m = String(monthKey || "").match(/^(\d{4})-(\d{2})$/); if (!m)
@@ -361,7 +405,7 @@ const parseDuration = (val) => {
     const s = String(val).trim();
     if (/^\d+(\.\d+)?$/.test(s))
         return Math.round(Number(s));
-    const hms = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    const hms = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}(?:\.\d+)?))?$/);
     if (hms)
         return Number(hms[1]) * 3600 + Number(hms[2]) * 60 + Number(hms[3] || 0);
     const zh = s.match(/(?:(\d+)\s*小時)?\s*(?:(\d+)\s*分)?\s*(?:(\d+)\s*秒)?/);
@@ -929,7 +973,7 @@ function CrmValidationPanel({ report }) {
             React.createElement("span", { style: CRM.title }, "\u8CC7\u6599\u9A57\u8B49\u5831\u544A"),
             React.createElement("span", { style: CRM.badge(warns.length ? "#fef3c7" : "#f0fdf4", warns.length ? "#92400e" : "#15803d") }, warns.length ? `⚠ ${warns.length} 項提醒` : "✓ 驗證通過")),
         React.createElement("div", { style: { padding: "16px 20px", display: "flex", flexDirection: "column", gap: "14px" } },
-            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: "10px" } }, [
+            React.createElement("div", { className: "rwd-multi-col", style: { display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: "10px" } }, [
                 { l: "原始資料", v: report.rawCount },
                 { l: "傳入筆數", v: report.incomingCount },
                 { l: "有效資料", v: report.validCount },
@@ -937,7 +981,7 @@ function CrmValidationPanel({ report }) {
             ].map(k => (React.createElement("div", { key: k.l, style: CRM.kpi },
                 React.createElement("div", { style: { fontSize: "10px", fontWeight: "700", color: "#94a3b8", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: "6px" } }, k.l),
                 React.createElement("div", { style: { fontSize: "22px", fontWeight: "600", color: "#1e293b" } }, k.v))))),
-            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: "8px", fontSize: "12px", color: "#64748b" } },
+            React.createElement("div", { className: "rwd-multi-col", style: { display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: "8px", fontSize: "12px", color: "#64748b" } },
                 React.createElement("div", { style: { background: "#f8fafc", borderRadius: "7px", padding: "10px 12px" } },
                     "\u65E5\u671F\u7BC4\u570D\uFF1A",
                     React.createElement("span", { style: { fontWeight: "600", color: "#1e293b" } }, report.dateRange || "—")),
@@ -1155,10 +1199,15 @@ function PeriodFilterPanel({ allYears, allMonths, allWeeks, cloudMasterStore, se
                     unit))))));
 }
 // ─── TrendPanel: Professional CRM UI ─────────────────────────────────────────
-function TrendPanel({ periodList, viewType, availableAgents, effectiveRules, includeHistoryAgents, setIncludeHistoryAgents, selectedTrendAgents, setSelectedTrendAgents, selectedMetric, setSelectedMetric }) {
+function TrendPanel({ periodList, viewType, availableAgents, effectiveRules, includeHistoryAgents, setIncludeHistoryAgents, selectedTrendAgents, setSelectedTrendAgents, selectedMetric, setSelectedMetric, eventList, addEvent, deleteEvent }) {
     var _a;
     const chartRef = useRef(null);
     const chartInstRef = useRef(null);
+    const [eventMarkers, setEventMarkers] = useState([]);
+    const [chartResizeTick, setChartResizeTick] = useState(0);
+    const [eventFilterTypes, setEventFilterTypes] = useState(() => EVENT_TYPES.map(t => t.key));
+    const [showEventForm, setShowEventForm] = useState(false);
+    const [eventDraft, setEventDraft] = useState({ date: "", type: EVENT_TYPES[0].key, title: "", note: "" });
     const AGENT_PALETTE = [
         { color: "#2563eb", bg: "#eff6ff", tc: "#1e40af" },
         { color: "#0891b2", bg: "#ecfeff", tc: "#155e75" },
@@ -1259,6 +1308,16 @@ function TrendPanel({ periodList, viewType, availableAgents, effectiveRules, inc
         }
         return "";
     }, [kpiLow, periodList, activeAgents, getVal]);
+    const periodAvgAt = useCallback((period) => {
+        if (!period)
+            return null;
+        const vals = activeAgents.map(name => getVal(period, name)).filter(v => v != null);
+        return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    }, [activeAgents, getVal]);
+    const prevPeriod = periodList[periodList.length - 2];
+    const currentPeriodAvg = useMemo(() => periodAvgAt(lastPeriod), [periodAvgAt, lastPeriod]);
+    const prevPeriodAvg = useMemo(() => periodAvgAt(prevPeriod), [periodAvgAt, prevPeriod]);
+    const periodDelta = (currentPeriodAvg != null && prevPeriodAvg != null) ? currentPeriodAvg - prevPeriodAvg : null;
     useEffect(() => {
         if (!chartRef.current || !window.Chart)
             return;
@@ -1289,6 +1348,7 @@ function TrendPanel({ periodList, viewType, availableAgents, effectiveRules, inc
             data: { labels: periodLabels, datasets },
             options: {
                 responsive: true, maintainAspectRatio: false, spanGaps: false,
+                onResize: () => setChartResizeTick((t) => t + 1),
                 interaction: { mode: "index", intersect: false },
                 plugins: {
                     legend: { display: false },
@@ -1308,6 +1368,30 @@ function TrendPanel({ periodList, viewType, availableAgents, effectiveRules, inc
         return () => { if (chartInstRef.current)
             chartInstRef.current.destroy(); };
     }, [activeAgents, periodList, selectedMetric, viewType, effectiveRules]);
+    useEffect(() => {
+        if (!chartInstRef.current || !periodList.length || !activeAgents.length) {
+            setEventMarkers([]);
+            return;
+        }
+        const visible = (eventList || []).filter(ev => eventFilterTypes.includes(ev.type));
+        const chartArea = chartInstRef.current.chartArea || null;
+        const idxCounts = {};
+        const markers = [];
+        visible.forEach(ev => {
+            const key = getPeriodKeyForDate(ev.date, viewType);
+            const idx = periodList.findIndex(p => p.periodKey === key);
+            if (idx === -1)
+                return;
+            try {
+                const baseX = chartInstRef.current.scales.x.getPixelForValue(idx);
+                const dupOffset = (idxCounts[idx] || 0) * 6;
+                idxCounts[idx] = (idxCounts[idx] || 0) + 1;
+                markers.push({ ...ev, x: baseX + dupOffset, top: chartArea ? chartArea.top : 0, bottom: chartArea ? chartArea.bottom : null });
+            }
+            catch (e) { }
+        });
+        setEventMarkers(markers);
+    }, [periodList, viewType, activeAgents, eventList, eventFilterTypes, selectedMetric, chartResizeTick]);
     const selAll = () => setSelectedTrendAgents([...availableAgents]);
     const clearAll = () => setSelectedTrendAgents([]);
     const toggleAgent = (name) => setSelectedTrendAgents(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name]);
@@ -1334,17 +1418,18 @@ function TrendPanel({ periodList, viewType, availableAgents, effectiveRules, inc
     const metricLabel = ((_a = METRIC_GROUPS.flatMap(g => g.items).find(m => m.key === selectedMetric)) === null || _a === void 0 ? void 0 : _a.label) || metricCfg.label;
     const periodRangeLabel = periodLabels.length ? `${periodLabels[0]}${periodLabels.length > 1 ? " — " + periodLabels[periodLabels.length - 1] : ""}` : "—";
     return (React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: "14px" } },
-        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: "10px" } }, [
+        React.createElement("div", { className: "tr-kpi-row" }, [
+            { label: "本期（較上期）", val: fmt(currentPeriodAvg), sub: prevPeriod ? React.createElement("span", { style: { color: periodDelta == null ? "#94a3b8" : periodDelta > 0 ? "#15803d" : periodDelta < 0 ? "#b91c1c" : "#64748b", fontWeight: "700" } }, periodDelta == null ? "—" : `${periodDelta > 0 ? "▲" : periodDelta < 0 ? "▼" : "—"} ${fmt(Math.abs(periodDelta))} 較上期`) : "尚無上期資料可比對", color: "#0f172a", highlight: true },
             { label: "比對人數", val: activeAgents.length, sub: "人員已選取", color: "#1e293b" },
             { label: "期間最高", val: fmt(kpiHigh), sub: kpiHighName || "—", color: "#15803d" },
             { label: "期間平均", val: fmt(kpiAvg), sub: `${periodLabels[0] || ""}${periodLabels.length > 1 ? " — " + periodLabels[periodLabels.length - 1] : ""}`, color: "#1d4ed8" },
             { label: "期間最低", val: fmt(kpiLow), sub: kpiLowName || "—", color: "#b91c1c" },
-        ].map(k => (React.createElement("div", { key: k.label, style: kpiCardStyle },
+        ].map(k => (React.createElement("div", { key: k.label, style: k.highlight ? { ...kpiCardStyle, background: "#eff6ff", border: "0.5px solid #bfdbfe" } : kpiCardStyle },
             React.createElement("div", { style: { fontSize: "10px", fontWeight: "700", color: "#94a3b8", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: "8px" } }, k.label),
             React.createElement("div", { style: { fontSize: "22px", fontWeight: "600", color: k.color, lineHeight: 1 } }, k.val),
             React.createElement("div", { style: { fontSize: "11px", color: "#94a3b8", marginTop: "5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, k.sub || "—"))))),
         React.createElement("div", { style: cardStyle },
-            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "190px 1fr", minHeight: "340px" } },
+            React.createElement("div", { className: "rwd-split", style: { display: "grid", gridTemplateColumns: "190px 1fr", minHeight: "340px" } },
                 React.createElement("div", { style: { borderRight: "0.5px solid #f1f5f9", paddingTop: "8px", paddingBottom: "8px" } }, METRIC_GROUPS.map(group => (React.createElement("div", { key: group.label },
                     React.createElement("div", { style: { padding: "8px 16px 4px", fontSize: "10px", fontWeight: "700", color: "#cbd5e1", letterSpacing: ".08em", textTransform: "uppercase" } }, group.label),
                     group.items.map(item => {
@@ -1376,7 +1461,14 @@ function TrendPanel({ periodList, viewType, availableAgents, effectiveRules, inc
                                 React.createElement("span", { style: { fontWeight: "500" } }, name)));
                         }))),
                     activeAgents.length === 0 || periodList.length === 0 ? (React.createElement("div", { style: { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontSize: "13px", height: "200px" } }, "\u8ACB\u9078\u53D6\u4EBA\u54E1\u4E26\u8A2D\u5B9A\u671F\u9593\u7BE9\u9078\u689D\u4EF6")) : (React.createElement("div", { style: { position: "relative", height: "200px", width: "100%" } },
-                        React.createElement("canvas", { ref: chartRef, role: "img", "aria-label": "\u5BA2\u670D\u8DA8\u52E2\u6298\u7DDA\u5716" }, "\u8DA8\u52E2\u8CC7\u6599"))),
+                        React.createElement("canvas", { ref: chartRef, role: "img", "aria-label": "\u5BA2\u670D\u8DA8\u52E2\u6298\u7DDA\u5716" }, "\u8DA8\u52E2\u8CC7\u6599"),
+                        eventMarkers.map((m, mi) => {
+                            const cfg = EVENT_TYPES.find(t => t.key === m.type) || EVENT_TYPES[EVENT_TYPES.length - 1];
+                            const lineTop = m.top != null ? m.top : 0;
+                            const lineBottom = m.bottom != null ? m.bottom : "18px";
+                            return React.createElement("div", { key: m.id || mi, style: { position: "absolute", left: `${m.x}px`, top: typeof lineTop === "number" ? `${lineTop}px` : lineTop, height: typeof lineBottom === "number" ? `${lineBottom - lineTop}px` : undefined, bottom: typeof lineBottom === "number" ? undefined : lineBottom, width: 0, borderLeft: `1.5px dashed ${cfg.color}`, pointerEvents: "none" } },
+                                React.createElement("div", { title: `${m.date} \u30FB ${cfg.label}\n${m.title}${m.note ? "\n" + m.note : ""}`, style: { position: "absolute", bottom: "-8px", left: "-5px", width: "10px", height: "10px", borderRadius: "50%", background: cfg.color, border: "1.5px solid #fff", boxShadow: `0 0 0 1px ${cfg.color}`, pointerEvents: "auto", cursor: "pointer" } }));
+                        }))),
                     React.createElement("div", { style: { borderTop: "0.5px solid #f1f5f9", paddingTop: "12px" } },
                         React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" } },
                             React.createElement("span", { style: { fontSize: "10px", fontWeight: "700", color: "#cbd5e1", letterSpacing: ".06em", textTransform: "uppercase" } }, "\u4EBA\u54E1\u7BE9\u9078"),
@@ -1401,7 +1493,36 @@ function TrendPanel({ periodList, viewType, availableAgents, effectiveRules, inc
                                 React.createElement("span", { style: { width: "7px", height: "7px", borderRadius: "50%", background: (clr === null || clr === void 0 ? void 0 : clr.color) || "#888", flexShrink: 0 } }),
                                 name));
                         })))))),
-        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "320px 1fr", gap: "12px", alignItems: "start" } },
+        React.createElement("div", { style: cardStyle },
+            React.createElement("div", { style: cardHeaderStyle },
+                React.createElement("span", { style: cardTitleStyle }, "事件註記"),
+                React.createElement("button", { type: "button", onClick: () => setShowEventForm(v => !v), style: { fontSize: "11px", padding: "3px 10px", border: "0.5px solid #e2e8f0", borderRadius: "6px", background: showEventForm ? "#eff6ff" : "#fff", color: showEventForm ? "#1d4ed8" : "#64748b", cursor: "pointer", fontFamily: "inherit" } }, showEventForm ? "收合" : "＋ 新增事件")),
+            React.createElement("div", { style: { padding: "14px 20px", display: "flex", flexDirection: "column", gap: "10px" } },
+                React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } }, EVENT_TYPES.map(t => {
+                    const on = eventFilterTypes.includes(t.key);
+                    return React.createElement("button", { key: t.key, type: "button", onClick: () => setEventFilterTypes(prev => prev.includes(t.key) ? prev.filter(x => x !== t.key) : [...prev, t.key]), style: { display: "inline-flex", alignItems: "center", gap: "5px", padding: "4px 10px", borderRadius: "20px", fontSize: "12px", cursor: "pointer", fontFamily: "inherit", border: on ? `0.5px solid ${t.color}` : "0.5px solid #e2e8f0", background: on ? t.color + "15" : "#f8fafc", color: on ? t.color : "#94a3b8", fontWeight: on ? "500" : "400" } },
+                        React.createElement("span", { style: { width: "7px", height: "7px", borderRadius: "50%", background: t.color, flexShrink: 0 } }),
+                        t.label);
+                })),
+                showEventForm && React.createElement("div", { style: { background: "#f8fafc", borderRadius: "8px", padding: "12px", display: "flex", flexDirection: "column", gap: "8px" } },
+                    React.createElement("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
+                        React.createElement("input", { type: "date", value: eventDraft.date, onChange: e => setEventDraft(d => ({ ...d, date: e.target.value })), style: { fontSize: "12px", padding: "6px 8px", border: "0.5px solid #e2e8f0", borderRadius: "6px", fontFamily: "inherit" } }),
+                        React.createElement("select", { value: eventDraft.type, onChange: e => setEventDraft(d => ({ ...d, type: e.target.value })), style: { fontSize: "12px", padding: "6px 8px", border: "0.5px solid #e2e8f0", borderRadius: "6px", fontFamily: "inherit" } }, EVENT_TYPES.map(t => React.createElement("option", { key: t.key, value: t.key }, t.label))),
+                        React.createElement("input", { type: "text", placeholder: "標題,例如:新進客服3名上線", value: eventDraft.title, onChange: e => setEventDraft(d => ({ ...d, title: e.target.value })), style: { flex: 1, minWidth: "160px", fontSize: "12px", padding: "6px 8px", border: "0.5px solid #e2e8f0", borderRadius: "6px", fontFamily: "inherit" } })),
+                    React.createElement("textarea", { placeholder: "備註(選填)", value: eventDraft.note, onChange: e => setEventDraft(d => ({ ...d, note: e.target.value })), style: { fontSize: "12px", padding: "6px 8px", border: "0.5px solid #e2e8f0", borderRadius: "6px", fontFamily: "inherit", minHeight: "50px" } }),
+                    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "10px" } },
+                        React.createElement("button", { type: "button", disabled: !eventDraft.date || !eventDraft.title.trim(), onClick: () => { if (!eventDraft.date || !eventDraft.title.trim())
+                                return; addEvent({ ...eventDraft, title: eventDraft.title.trim() }); setEventDraft({ date: "", type: EVENT_TYPES[0].key, title: "", note: "" }); setShowEventForm(false); }, style: { fontSize: "12px", padding: "6px 14px", border: "none", borderRadius: "6px", background: (!eventDraft.date || !eventDraft.title.trim()) ? "#cbd5e1" : "#2563eb", color: "#fff", cursor: (!eventDraft.date || !eventDraft.title.trim()) ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: "500" } }, "儲存事件"),
+                        (!eventDraft.date || !eventDraft.title.trim()) && React.createElement("span", { style: { fontSize: "11px", color: "#94a3b8" } }, "請填寫日期與標題"))),
+                eventList.length === 0 ? React.createElement("div", { style: { fontSize: "12px", color: "#94a3b8", padding: "4px 0" } }, "尚無事件紀錄") : React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: "4px", maxHeight: "140px", overflow: "auto" } }, eventList.slice().sort((a, b) => b.date.localeCompare(a.date)).map(ev => {
+                    const cfg = EVENT_TYPES.find(t => t.key === ev.type) || EVENT_TYPES[EVENT_TYPES.length - 1];
+                    return React.createElement("div", { key: ev.id, style: { display: "flex", alignItems: "center", gap: "8px", padding: "5px 8px", borderRadius: "6px", fontSize: "12px" } },
+                        React.createElement("span", { style: { width: "7px", height: "7px", borderRadius: "50%", background: cfg.color, flexShrink: 0 } }),
+                        React.createElement("span", { style: { color: "#94a3b8", flexShrink: 0 } }, ev.date),
+                        React.createElement("span", { style: { color: "#1e293b", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ev.title),
+                        React.createElement("button", { type: "button", onClick: () => deleteEvent(ev.id), style: { fontSize: "11px", padding: "1px 7px", border: "0.5px solid #e2e8f0", borderRadius: "5px", background: "#fff", color: "#94a3b8", cursor: "pointer", fontFamily: "inherit" } }, "刪除"));
+                })))),
+        React.createElement("div", { className: "rwd-split", style: { display: "grid", gridTemplateColumns: "320px 1fr", gap: "12px", alignItems: "start" } },
             React.createElement("div", { style: cardStyle },
                 React.createElement("div", { style: cardHeaderStyle },
                     React.createElement("span", { style: cardTitleStyle }, "\u6700\u65B0\u671F\u9593\u6392\u540D"),
@@ -1420,7 +1541,7 @@ function TrendPanel({ periodList, viewType, availableAgents, effectiveRules, inc
                             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "6px" } },
                                 agentShift && React.createElement("span", { style: { fontSize: "10px", fontWeight: "600", padding: "1px 6px", borderRadius: "8px", background: sc.bg, color: sc.tc, whiteSpace: "nowrap" } }, agentShift),
                                 React.createElement("div", { style: { flex: 1, height: "4px", background: "#f1f5f9", borderRadius: "2px", overflow: "hidden" } },
-                                    React.createElement("div", { style: { height: "100%", width: `${Math.round((v / rankData[0].v) * 100)}%`, background: (clr === null || clr === void 0 ? void 0 : clr.color) || "#2563eb", borderRadius: "2px", transition: "width .4s" } })))),
+                                    React.createElement("div", { style: { height: "100%", width: `${rankData[0].v ? Math.round((v / rankData[0].v) * 100) : 0}%`, background: (clr === null || clr === void 0 ? void 0 : clr.color) || "#2563eb", borderRadius: "2px", transition: "width .4s" } })))),
                         React.createElement("div", { style: { textAlign: "right" } },
                             React.createElement("span", { style: { fontSize: "12px", fontWeight: "600", color: (clr === null || clr === void 0 ? void 0 : clr.tc) || "#334155", background: (clr === null || clr === void 0 ? void 0 : clr.bg) || "#f1f5f9", padding: "3px 8px", borderRadius: "6px", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" } }, fmt(v)))));
                 }))),
@@ -1519,6 +1640,7 @@ function App() {
     const [activeTab, setActiveTab] = useState("weekly");
     const [shiftRules, setShiftRules] = useState(EMPTY_SHIFT_RULES);
     const [effectiveRules, setEffectiveRules] = useState(EMPTY_EFFECTIVE_RULES);
+    const [eventList, setEventList] = useState(EMPTY_EVENT_LIST);
     const [shiftEditorMonth, setShiftEditorMonth] = useState("default");
     const [shiftMonthInput, setShiftMonthInput] = useState("");
     const [shiftDraft, setShiftDraft] = useState({ "早班": "", "中班": "", "晚班": "" });
@@ -1582,6 +1704,26 @@ function App() {
         if (firebaseReady && user && db)
             await db.collection("weekly_call_project").doc("shift_rules").set({ rules }, { merge: true });
         setSyncStatus("☁️ 班表已同步 ✓");
+    };
+    const persistEvents = async (events) => {
+        localStorage.setItem("weekly_call_project_events", JSON.stringify(events));
+        try {
+            if (firebaseReady && user && db)
+                await db.collection("weekly_call_project").doc("events").set({ events }, { merge: true });
+            setSyncStatus("☁️ 事件註記已同步 ✓");
+        }
+        catch (e) {
+            console.error(e);
+            setSyncStatus(`事件同步失敗：${e.message || e}`);
+        }
+    };
+    const addEvent = (draft) => {
+        const id = `ev_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const newEvent = { id, date: draft.date, type: draft.type, title: draft.title, note: draft.note || "" };
+        setEventList((prev) => { const next = [...prev, newEvent]; persistEvents(next); return next; });
+    };
+    const deleteEvent = (id) => {
+        setEventList((prev) => { const next = prev.filter((ev) => ev.id !== id); persistEvents(next); return next; });
     };
     const saveEffectiveRules = async (rules) => {
         setEffectiveRules(rules);
@@ -1794,6 +1936,11 @@ function App() {
         if (s)
             setEffectiveRules(JSON.parse(s));
     }
+    catch (e) { } try {
+        const s = localStorage.getItem("weekly_call_project_events");
+        if (s)
+            setEventList(JSON.parse(s));
+    }
     catch (e) { } }, []);
     useEffect(() => {
         if (!firebaseReady || !auth)
@@ -1818,6 +1965,12 @@ function App() {
                         effectiveForInitialLoad = rules;
                         setEffectiveRules(rules);
                         localStorage.setItem("weekly_call_project_effective_rules", JSON.stringify(rules));
+                    }
+                    const eventsSnap = await db.collection("weekly_call_project").doc("events").get();
+                    if (eventsSnap.exists) {
+                        const events = eventsSnap.data().events || EMPTY_EVENT_LIST;
+                        setEventList(events);
+                        localStorage.setItem("weekly_call_project_events", JSON.stringify(events));
                     }
                     await loadCloudBundle({ autoPreview: true, shiftRulesOverride: rulesForInitialLoad, effectiveRulesOverride: effectiveForInitialLoad, userOverride: u });
                 }
@@ -2020,7 +2173,7 @@ function App() {
             const yearKeys = Array.from(new Set(previewUnique.map((r) => r.yearKey).filter(Boolean))).sort();
             const rowChunks = chunkArray(newRows, 300);
             const reportRef = db.collection("weekly_call_project_reports").doc(docId);
-            await reportRef.set({ fileName: csvFileName || "未命名檔案", validCount: previewUnique.length, insertedCount: newRows.length, duplicateCountWithCloud: duplicateWithCloud, agentCount: Array.from(new Set(previewUnique.map((r) => r.agent).filter(Boolean))).length, weekKeys, monthKeys, yearKeys, createdAt: firebase.firestore.FieldValue.serverTimestamp(), createdAtMillis: Date.now(), createdBy: activeUser.email, rowStorage: rowChunks.length > 1 ? "chunks" : "inline", rowChunkCount: rowChunks.length, rows: rowChunks.length <= 1 ? newRows : [] });
+            await reportRef.set({ fileName: csvFileName || "未命名檔案", validCount: previewUnique.length, insertedCount: newRows.length, duplicateCountWithCloud: duplicateWithCloud, agentCount: Array.from(new Set(previewUnique.map((r) => r.agent).filter(Boolean))).length, weekKeys, monthKeys, yearKeys, createdAt: firebase.firestore.FieldValue.serverTimestamp(), createdAtMillis: Date.now(), createdBy: (activeUser && activeUser.email) || "", rowStorage: rowChunks.length > 1 ? "chunks" : "inline", rowChunkCount: rowChunks.length, rows: rowChunks.length <= 1 ? newRows : [] });
             if (rowChunks.length > 1) {
                 for (let i = 0; i < rowChunks.length; i++) {
                     await reportRef.collection("rows_chunks").doc(`chunk_${String(i + 1).padStart(4, "0")}`).set({ chunkIndex: i + 1, rows: rowChunks[i] });
@@ -2284,13 +2437,14 @@ function App() {
             rows = ((_b = (_a = cloudMasterStore.detailByWeek) === null || _a === void 0 ? void 0 : _a[detailKey]) === null || _b === void 0 ? void 0 : _b.rows) || [];
         else if (detailMode === "months") {
             const expected = getMonthExpectedRange(detailKey);
-            rows = (cloudMasterStore.rows || []).filter((r) => r.date >= expected.start && r.date <= expected.end);
+            rows = (cloudMasterStore.rows || []).filter((r) => { const d = String(r.date || "").replace(/\//g, "-"); return d >= expected.start && d <= expected.end; });
         }
         else
             rows = (cloudMasterStore.rows || []).filter((r) => r.yearKey === detailKey);
         return rows.slice().sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
     }, [cloudMasterStore, detailMode, detailKey]);
     const previewSummary = useMemo(() => summarizePreviewRows(previewRows), [previewRows]);
+    const detailSummary = useMemo(() => summarizePreviewRows(detailRows), [detailRows]);
     const previewAnalysisRows = useMemo(() => buildSatisfactionAnalysisRows(previewRows), [previewRows]);
     const previewPaging = useMemo(() => paginateRows(previewRows, previewPage, previewPageSize), [previewRows, previewPage, previewPageSize]);
     const detailPaging = useMemo(() => paginateRows(detailRows, detailPage, detailPageSize), [detailRows, detailPage, detailPageSize]);
@@ -2387,14 +2541,14 @@ function App() {
             subtitle && React.createElement("p", { style: { fontSize: "12px", color: "#94a3b8", marginTop: "4px" } }, subtitle)),
         actions && React.createElement("div", { style: { display: "flex", gap: "8px", flexWrap: "wrap" } }, actions)));
     return (React.createElement("div", { style: pageStyle },
-        React.createElement("div", { style: topbarStyle },
+        React.createElement("div", { className: "app-topbar", style: topbarStyle },
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "12px" } },
                 React.createElement("div", { style: { width: "28px", height: "28px", borderRadius: "7px", background: "#1d4ed8", display: "flex", alignItems: "center", justifyContent: "center" } },
                     React.createElement("svg", { width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "#fff", strokeWidth: "2", "aria-hidden": "true" },
                         React.createElement("path", { d: "M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9Z" }))),
                 React.createElement("span", { style: { fontSize: "14px", fontWeight: "700", color: "#0f172a" } }, "\u5BA2\u670D\u96FB\u8A71\u7D00\u9304\u9577\u671F\u89C0\u5BDF\u7CFB\u7D71")),
-            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "10px" } },
-                React.createElement("span", { style: { fontSize: "11px", color: "#94a3b8" } }, syncStatus),
+            React.createElement("div", { className: "app-topbar-actions", style: { display: "flex", alignItems: "center", gap: "10px" } },
+                React.createElement("span", { className: "app-syncstatus", style: { fontSize: "11px", color: "#94a3b8" } }, syncStatus),
                 getActiveUser() && React.createElement("span", { style: { fontSize: "12px", background: "#f1f5f9", color: "#475569", padding: "4px 10px", borderRadius: "6px", fontWeight: "500" } }, getActiveUser().email),
                 [
                     { title: "重新整理", bg: "#4f46e5", fn: () => loadCloudBundle({ autoPreview: true }), icon: React.createElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2" },
@@ -2412,8 +2566,8 @@ function App() {
                             React.createElement("path", { d: "M19 6l-1 14H6L5 6" })) },
                 ].map(b => (React.createElement("button", { key: b.title, title: b.title, onClick: b.fn, style: { width: "32px", height: "32px", borderRadius: "7px", background: b.bg, border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" } }, b.icon))),
                 React.createElement("button", { onClick: handleLogout, style: { padding: "5px 14px", borderRadius: "7px", border: "0.5px solid #e2e8f0", background: "#fff", color: "#475569", fontSize: "12px", fontWeight: "500", cursor: "pointer", fontFamily: "inherit" } }, "\u767B\u51FA"))),
-        React.createElement("div", { style: mainStyle },
-            React.createElement("div", { style: sideStyle },
+        React.createElement("div", { className: "app-main", style: mainStyle },
+            React.createElement("div", { className: "app-sidebar", style: sideStyle },
                 React.createElement("div", { style: { padding: "10px 6px 14px", borderBottom: "0.5px solid #f1f5f9", marginBottom: "10px" } },
                     React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" } }, [
                         { l: "累積年份", v: allYears.length },
@@ -2424,7 +2578,7 @@ function App() {
                         React.createElement("div", { style: { fontSize: "10px", color: "#94a3b8", fontWeight: "600", letterSpacing: ".04em", textTransform: "uppercase" } }, s.l),
                         React.createElement("div", { style: { fontSize: "18px", fontWeight: "700", color: "#0f172a", lineHeight: 1.2, marginTop: "3px" } }, s.v))))),
                     uploadMessage && React.createElement("div", { style: { marginTop: "8px", padding: "8px 10px", background: "#f0fdf4", border: "0.5px solid #bbf7d0", borderRadius: "7px", fontSize: "11px", color: "#15803d", lineHeight: "1.5" } }, uploadMessage)),
-                tabs.map(t => (React.createElement("button", { key: t.id, onClick: () => setActiveTab(t.id), style: sideTabStyle(activeTab === t.id) },
+                tabs.map(t => (React.createElement("button", { key: t.id, className: "app-sidebar-btn", onClick: () => setActiveTab(t.id), style: sideTabStyle(activeTab === t.id) },
                     React.createElement(Icon, { name: t.icon, size: 15 }),
                     t.name))),
                 React.createElement("div", { style: { marginTop: "auto", padding: "10px 6px 0", borderTop: "0.5px solid #f1f5f9" } },
@@ -2435,7 +2589,7 @@ function App() {
             React.createElement("div", { style: contentStyle },
                 activeTab === "upload" && (React.createElement(React.Fragment, null,
                     React.createElement(PageHeader, { title: "\u8CC7\u6599\u4E0A\u50B3", subtitle: "\u652F\u63F4 CSV / XLSX / XLS\uFF0C\u53EF\u62D6\u66F3\u6216\u9EDE\u9078\u4E0A\u50B3" }),
-                    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "240px 1fr", gap: "16px", alignItems: "start" } },
+                    React.createElement("div", { className: "rwd-split", style: { display: "grid", gridTemplateColumns: "240px 1fr", gap: "16px", alignItems: "start" } },
                         React.createElement("div", { style: { ...CRM.cardLg, overflow: "hidden" } },
                             React.createElement("div", { style: CRM.hdr },
                                 React.createElement("span", { style: CRM.title }, "\u4E0A\u50B3\u8A2D\u5B9A")),
@@ -2510,7 +2664,7 @@ function App() {
                 activeTab === "trend" && (React.createElement(React.Fragment, null,
                     React.createElement(PageHeader, { title: "\u8DA8\u52E2\u5206\u6790", subtitle: "\u591A\u4EBA\u6307\u6A19\u6BD4\u5C0D\u3001\u671F\u9593\u5FEB\u901F\u7BE9\u9078\u3001\u6392\u540D\u8207\u660E\u7D30" }),
                     React.createElement(PeriodFilterPanel, { allYears: allYears, allMonths: allMonths, allWeeks: allWeeks, cloudMasterStore: cloudMasterStore, selectedYears: selectedYears, selectedMonths: selectedMonths, selectedWeeks: selectedWeeks, setSelectedYears: setSelectedYears, setSelectedMonths: setSelectedMonths, setSelectedWeeks: setSelectedWeeks, viewType: viewType, setViewType: setViewType }),
-                    React.createElement(TrendPanel, { periodList: periodList, viewType: viewType, availableAgents: availableAgents, effectiveRules: effectiveRules, includeHistoryAgents: includeHistoryAgents, setIncludeHistoryAgents: setIncludeHistoryAgents, selectedTrendAgents: selectedTrendAgents, setSelectedTrendAgents: setSelectedTrendAgents, selectedMetric: selectedMetric, setSelectedMetric: setSelectedMetric }))),
+                    React.createElement(TrendPanel, { periodList: periodList, viewType: viewType, availableAgents: availableAgents, effectiveRules: effectiveRules, includeHistoryAgents: includeHistoryAgents, setIncludeHistoryAgents: setIncludeHistoryAgents, selectedTrendAgents: selectedTrendAgents, setSelectedTrendAgents: setSelectedTrendAgents, selectedMetric: selectedMetric, setSelectedMetric: setSelectedMetric, eventList: eventList, addEvent: addEvent, deleteEvent: deleteEvent }))),
                 activeTab === "detail" && (React.createElement(React.Fragment, null,
                     React.createElement(PageHeader, { title: "\u660E\u7D30\u67E5\u8A62", subtitle: `共 ${detailRows.length} 筆`, actions: [
                             React.createElement("select", { key: "mode", value: detailMode, onChange: e => { setDetailMode(e.target.value); setDetailKey(""); }, style: CRM.select },
@@ -2544,12 +2698,12 @@ function App() {
                                 " \u7B46")),
                         React.createElement(CrmTableRows, { rows: detailPaging.rows, start: detailPaging.start }),
                         React.createElement(CrmPagination, { total: detailRows.length, page: detailPage, pageSize: detailPageSize, onPageChange: setDetailPage, onPageSizeChange: setDetailPageSize })),
-                    React.createElement(CrmSummaryTable, { title: "\u96FB\u8A71\u63A5\u807D\u6642\u6578 \u2014 \u7E3D\u8655\u7406\u6642\u9593", rows: summarizePreviewRows(detailRows).handleRows }),
-                    React.createElement(CrmSummaryTable, { title: "\u96FB\u8A71\u63A5\u807D\u6642\u6578 \u2014 \u7E3D\u767C\u8A71\u6642\u9593", rows: summarizePreviewRows(detailRows).speakRows }),
+                    React.createElement(CrmSummaryTable, { title: "\u96FB\u8A71\u63A5\u807D\u6642\u6578 \u2014 \u7E3D\u8655\u7406\u6642\u9593", rows: detailSummary.handleRows }),
+                    React.createElement(CrmSummaryTable, { title: "\u96FB\u8A71\u63A5\u807D\u6642\u6578 \u2014 \u7E3D\u767C\u8A71\u6642\u9593", rows: detailSummary.speakRows }),
                     React.createElement(CrmAnalysisTable, { rows: buildSatisfactionAnalysisRows(detailRows) }))),
                 activeTab === "shift" && (React.createElement(React.Fragment, null,
                     React.createElement(PageHeader, { title: "\u73ED\u8868\u8207\u4EBA\u54E1\u6709\u6548\u671F\u9593", subtitle: "\u8A2D\u5B9A\u5404\u6708\u4EFD\u73ED\u5225\u540D\u55AE\u53CA\u4EBA\u54E1\u6709\u6548\u670D\u52D9\u671F\u9593" }),
-                    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "220px 1fr", gap: "16px", alignItems: "start" } },
+                    React.createElement("div", { className: "rwd-split", style: { display: "grid", gridTemplateColumns: "220px 1fr", gap: "16px", alignItems: "start" } },
                         React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: "12px" } },
                             React.createElement("div", { style: { ...CRM.cardLg, overflow: "hidden" } },
                                 React.createElement("div", { style: CRM.hdr },
@@ -2569,7 +2723,7 @@ function App() {
                                     React.createElement("select", { value: shiftEditorMonth, onChange: e => setShiftEditorMonth(e.target.value), style: CRM.select }, shiftMonthKeys.map(k => React.createElement("option", { key: k, value: k }, k))),
                                     shiftEditorMonth !== "default" && React.createElement("button", { onClick: () => deleteShiftMonth(shiftEditorMonth), style: { ...CRM.btnDanger, padding: "5px 12px", fontSize: "12px" } }, "\u522A\u9664"),
                                     React.createElement("button", { onClick: saveCurrentShiftMonth, style: { ...CRM.btnPrimary, padding: "5px 14px", fontSize: "12px" } }, "\u5132\u5B58"))),
-                            React.createElement("div", { style: { padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "12px" } }, ["早班", "中班", "晚班"].map(shift => {
+                            React.createElement("div", { className: "rwd-multi-col", style: { padding: "16px 20px", display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "12px" } }, ["早班", "中班", "晚班"].map(shift => {
                                 const sc = CRM.SHIFT[shift] || { bg: "#f1f5f9", tc: "#475569" };
                                 return (React.createElement("div", { key: shift, style: { background: "#f9fafb", borderRadius: "8px", padding: "12px 14px", border: "0.5px solid #e2e8f0" } },
                                     React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px" } },
@@ -2582,7 +2736,7 @@ function App() {
                             React.createElement("span", { style: CRM.badge("#f8fafc", "#64748b") },
                                 Object.keys(effectiveRules).length,
                                 " \u4EBA")),
-                        React.createElement("div", { style: { padding: "14px 20px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 100px", gap: "8px", borderBottom: "0.5px solid #f1f5f9" } },
+                        React.createElement("div", { className: "rwd-multi-col", style: { padding: "14px 20px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 100px", gap: "8px", borderBottom: "0.5px solid #f1f5f9" } },
                             React.createElement("input", { value: effectiveDraft.name, onChange: e => setEffectiveDraft(p => ({ ...p, name: e.target.value })), placeholder: "\u5BA2\u670D\u540D\u7A31", style: CRM.input }),
                             React.createElement("input", { value: effectiveDraft.start, onChange: e => setEffectiveDraft(p => ({ ...p, start: e.target.value })), placeholder: "\u8D77\u59CB \u4F8B 2025-W09", style: CRM.input }),
                             React.createElement("input", { value: effectiveDraft.end, onChange: e => setEffectiveDraft(p => ({ ...p, end: e.target.value })), placeholder: "\u7D50\u675F \u4F8B 2025-W35", style: CRM.input }),
