@@ -505,7 +505,7 @@ const extractSatisfaction = (tagText) => {
     }
     return { q1: normalizeSurveyAnswer(q1), q2: normalizeSurveyAnswer(q2) };
 };
-const makeRowUniqueKey = (row) => [String(row.id || "").trim(), String(row.agent || "").trim(), String(row.date || "").trim(), String(row.time || "").trim(), String(row.line || "").trim(), String(row.q1 || "").trim(), String(row.q2 || "").trim(), String(row.handleDuration || "").trim(), String(row.speakDuration || row.duration || "").trim()].join("||");
+const makeRowUniqueKey = (row) => [String(row.id || "").trim(), String(row.agent || "").trim(), String(row.date || "").trim(), String(row.time || "").trim(), String(row.line || "").trim(), String(row.q1 || "").trim(), String(row.q2 || "").trim()].join("||");
 const dedupeRows = (rows = []) => { const map = new Map(); rows.forEach((row) => { const key = makeRowUniqueKey(row); if (!map.has(key))
     map.set(key, row); }); return Array.from(map.values()); };
 const parseSimpleCsvLine = (line) => { const result = []; let cur = "", inQuotes = false; for (let i = 0; i < line.length; i++) {
@@ -2776,3 +2776,4 @@ ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(
 </script>
 </body>
 </html>
+
