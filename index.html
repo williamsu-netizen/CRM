@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://*.googleapis.com https://*.firebaseio.com https://*.firebaseapp.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firebaseinstallations.googleapis.com wss://*.firebaseio.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests" />
   <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(), payment=()" />
-  <meta name="referrer" content="no-referrer" />
+  <meta name="referrer" content="no-referrer-when-downgrade" />
   <title>客服電話紀錄長期觀察系統</title>
 
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -191,6 +191,14 @@ const TREND_AGENT_COLORS = [
 const TREND_DASH_PATTERNS = [[], [6, 3], [3, 3], [8, 3, 2, 3], [4, 2], [10, 3], [2, 2], [7, 2, 2, 2]];
 const formatPercent = (n) => `${Number(n || 0).toFixed(2)}%`;
 const formatToHours = (seconds) => (Number(seconds || 0) / 3600).toFixed(2);
+const formatDurationClock = (seconds) => {
+    const total = Math.round(Number(seconds || 0));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const mmss = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    return h > 0 ? `${h}:${mmss}` : mmss;
+};
 const normalizeMonthKey = (value) => { if (!value)
     return ""; const m = String(value).trim().match(/^(\d{4})[-\/](\d{1,2})$/); if (!m)
     return ""; return `${m[1]}-${String(m[2]).padStart(2, "0")}`; };
@@ -317,6 +325,21 @@ const getPeriodKeyForDate = (dateStr, viewType) => {
         return getCalendarMonthKey(dateStr);
     return getCalendarYearKey(dateStr);
 };
+const normalizePeriodKeyInput = (raw) => {
+    const v = String(raw || "").trim();
+    if (!v)
+        return "";
+    const week = v.match(/^(\d{4})-?[wW](\d{1,2})$/);
+    if (week)
+        return `${week[1]}-W${week[2].padStart(2, "0")}`;
+    const month = v.match(/^(\d{4})[-\/](\d{1,2})$/);
+    if (month)
+        return `${month[1]}-${month[2].padStart(2, "0")}`;
+    const year = v.match(/^(\d{4})$/);
+    if (year)
+        return year[1];
+    return null;
+};
 const keyToDateRange = (key) => {
     const v = String(key || "").trim();
     let m = v.match(/^(\d{4})-W(\d{2})$/);
@@ -437,7 +460,7 @@ const getRowValueByAliases = (rawRow) => {
         direction: pick(["初始方向", "方向", "Initial direction"]),
         datetime: pick(["日期", "日期時間", "Date"]),
         agent: pick(["使用者 - 已互動", "使用者-已互動", "使用者", "客服名稱"]),
-        line: pick(["第一佇列", "遊戲專線", "第一字句"]),
+        line: pick(["第一佇列", "佇列", "遊戲專線", "第一字句"]),
         handleTime: pick(["總處理時間", "處理時間"]),
         speakTime: pick(["總發話時間", "通話時長"]),
         tags: pick(["外部標籤", "滿意度"]),
@@ -505,7 +528,12 @@ const extractSatisfaction = (tagText) => {
     }
     return { q1: normalizeSurveyAnswer(q1), q2: normalizeSurveyAnswer(q2) };
 };
-const makeRowUniqueKey = (row) => [String(row.id || "").trim(), String(row.agent || "").trim(), String(row.date || "").trim(), String(row.time || "").trim(), String(row.line || "").trim(), String(row.q1 || "").trim(), String(row.q2 || "").trim()].join("||");
+const makeRowUniqueKey = (row) => {
+    const id = String(row.id || "").trim();
+    if (id)
+        return id;
+    return [String(row.agent || "").trim(), String(row.date || "").trim(), String(row.time || "").trim(), String(row.line || "").trim(), String(row.q1 || "").trim(), String(row.q2 || "").trim()].join("||");
+};
 const dedupeRows = (rows = []) => { const map = new Map(); rows.forEach((row) => { const key = makeRowUniqueKey(row); if (!map.has(key))
     map.set(key, row); }); return Array.from(map.values()); };
 const parseSimpleCsvLine = (line) => { const result = []; let cur = "", inQuotes = false; for (let i = 0; i < line.length; i++) {
@@ -853,7 +881,7 @@ const CRM = {
 };
 // ─── CRM TABLE: shared detail rows component ──────────────────────────────────
 function CrmTableRows({ rows, start = 0 }) {
-    const cols = ["客服名稱", "班別", "日期", "時間", "遊戲專線", "滿意度Q1", "滿意度Q2", "對話ID"];
+    const cols = ["客服名稱", "班別", "日期", "時間", "遊戲專線", "滿意度Q1", "滿意度Q2", "對話ID", "總發話時間", "總處理時間"];
     return (React.createElement("div", { style: { overflowX: "auto" } },
         React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: "13px" } },
             React.createElement("thead", null,
@@ -870,7 +898,9 @@ function CrmTableRows({ rows, start = 0 }) {
                     React.createElement("td", { style: CRM.td }, r.line),
                     React.createElement("td", { style: CRM.td }, r.q1),
                     React.createElement("td", { style: CRM.td }, r.q2),
-                    React.createElement("td", { style: { ...CRM.td, fontSize: "11px", color: "#94a3b8", fontFamily: "monospace" } }, r.id)));
+                    React.createElement("td", { style: { ...CRM.td, fontSize: "11px", color: "#94a3b8", fontFamily: "monospace" } }, r.id),
+                    React.createElement("td", { style: { ...CRM.td, fontFamily: "monospace" } }, formatDurationClock(r.speakDuration)),
+                    React.createElement("td", { style: { ...CRM.td, fontFamily: "monospace" } }, formatDurationClock(r.handleDuration))));
             })))));
 }
 // ─── CRM PAGINATION ───────────────────────────────────────────────────────────
@@ -1679,6 +1709,7 @@ function App() {
     const [detailPageSize, setDetailPageSize] = useState(100);
     const [isDragging, setIsDragging] = useState(false);
     const fileInputRef = useRef(null);
+    const latestDetailPeriodRef = useRef("");
     const getActiveUser = useCallback((overrideUser = null) => overrideUser || user || (firebaseReady && auth ? auth.currentUser : null), [user]);
     const getAllAgentsFromRules = useCallback((rules = shiftRules) => {
         const set = new Set();
@@ -1747,7 +1778,7 @@ function App() {
         const activeRules = rulesOverride || shiftRules;
         const activeEffective = effectiveOverride || effectiveRules;
         const agentBase = {};
-        const shouldSeedAgent = (name) => forceIncludeHistory ? isAgentEffectiveForPeriod(name, periodKey, periodType, activeEffective) : true;
+        const shouldSeedAgent = (name) => forceIncludeHistory ? true : isAgentEffectiveForPeriod(name, periodKey, periodType, activeEffective);
         getAllAgentsFromRules(activeRules).forEach((name) => {
             if (!periodKey || shouldSeedAgent(name)) {
                 agentBase[name] = { name, shift: getShiftInfoFromRules(activeRules, name, periodMonthKey).shift, totalCalls: 0, q1Answered: 0, q1VerySatisfied: 0, q1Ok: 0, q1VeryUnsatisfied: 0, q2Answered: 0, q2VerySatisfied: 0, q2Ok: 0, q2VeryUnsatisfied: 0, lines: { "GT專線": 0, "儲值專線": 0, "GT+儲值專線": 0, "滿貫專線": 0, "金好運專線": 0 } };
@@ -1903,15 +1934,18 @@ function App() {
             setSelectedYears((prev) => { const kept = prev.filter((x) => nextYears.includes(x)); const missing = nextYears.filter((x) => !kept.includes(x)); return [...kept, ...missing]; });
             setSelectedMonths((prev) => { const kept = prev.filter((x) => nextMonths.includes(x)); const missing = nextMonths.filter((x) => !kept.includes(x)); return [...kept, ...missing]; });
             setSelectedWeeks((prev) => { const kept = prev.filter((x) => nextWeeks.includes(x)); const missing = nextWeeks.filter((x) => !kept.includes(x)); return [...kept, ...missing]; });
-            if (nextWeeks.length && (!detailKey || !nextWeeks.includes(detailKey))) {
+            const latestAvailablePeriod = nextWeeks.length ? nextWeeks[nextWeeks.length - 1] : nextMonths.length ? nextMonths[nextMonths.length - 1] : nextYears.length ? nextYears[nextYears.length - 1] : "";
+            const hasNewerPeriod = latestAvailablePeriod && latestAvailablePeriod !== latestDetailPeriodRef.current;
+            latestDetailPeriodRef.current = latestAvailablePeriod;
+            if (nextWeeks.length && (!detailKey || !nextWeeks.includes(detailKey) || hasNewerPeriod)) {
                 setDetailMode("weeks");
                 setDetailKey(nextWeeks[nextWeeks.length - 1]);
             }
-            else if (!nextWeeks.length && nextMonths.length && (!detailKey || !nextMonths.includes(detailKey))) {
+            else if (!nextWeeks.length && nextMonths.length && (!detailKey || !nextMonths.includes(detailKey) || hasNewerPeriod)) {
                 setDetailMode("months");
                 setDetailKey(nextMonths[nextMonths.length - 1]);
             }
-            else if (!nextWeeks.length && !nextMonths.length && nextYears.length && (!detailKey || !nextYears.includes(detailKey))) {
+            else if (!nextWeeks.length && !nextMonths.length && nextYears.length && (!detailKey || !nextYears.includes(detailKey) || hasNewerPeriod)) {
                 setDetailMode("years");
                 setDetailKey(nextYears[nextYears.length - 1]);
             }
@@ -1923,6 +1957,7 @@ function App() {
                 setPreviewRows(preview);
                 setCsvFileName(latest.fileName || "雲端資料");
                 setPreviewMeta({ mode: raw.length ? "cloud-latest-with-rows" : "cloud-latest-metadata-only", title: raw.length ? `最新有明細的雲端資料：${latest.fileName || latest.id}` : `最新雲端資料只有索引：${latest.fileName || latest.id}`, weekKeys: Array.from(new Set(preview.map((r) => r.weekKey).filter(Boolean))).sort(), monthKeys: Array.from(new Set(preview.map((r) => r.monthKey).filter(Boolean))).sort(), yearKeys: Array.from(new Set(preview.map((r) => r.yearKey).filter(Boolean))).sort(), sourceCount: 1, recordCountBeforeDedupe: raw.length, recordCountAfterDedupe: preview.length });
+                setValidationReport(null);
                 if (raw.length)
                     setUploadMessage(`已自動載入最新有明細的雲端資料：${latest.fileName || latest.id}，有效資料 ${preview.length} 筆。`);
                 else
@@ -2221,6 +2256,7 @@ function App() {
                 setCsvFileName(firstDocData.fileName);
             setPreviewMeta({ mode: mergeMode ? "merge-selected-with-preview" : "selected-cloud", title: mergeMode ? "多筆雲端資料已累積到目前預覽" : "已載入選取的雲端資料", weekKeys: Array.from(new Set(finalRows.map((r) => r.weekKey).filter(Boolean))).sort(), monthKeys: Array.from(new Set(finalRows.map((r) => r.monthKey).filter(Boolean))).sort(), yearKeys: Array.from(new Set(finalRows.map((r) => r.yearKey).filter(Boolean))).sort(), sourceCount: selectedCloudItems.length, recordCountBeforeDedupe: rows.length, recordCountAfterDedupe: finalRows.length });
             setUploadMessage(mergeMode ? "已載入並累積選取的雲端資料。" : "已載入選取的雲端資料。");
+            setValidationReport(null);
             setActiveTab("weekly");
         }
         catch (e) {
@@ -2345,7 +2381,7 @@ function App() {
                 setWorksheetFormat(sheet, aoa.length, headers.length, percentColumns);
                 window.XLSX.utils.book_append_sheet(workbook, sheet, safeSheetName(sheetName));
             };
-            createSheet("客服通話明細表", ["客服名稱", "班別", "日期", "時間", "遊戲專線", "滿意度問題1", "滿意度問題2", "對話ID"], rows.map((r) => [r.agent, r.shift || "", formatCustomDate(r.date), r.time, r.line, r.q1, r.q2, r.id]));
+            createSheet("客服通話明細表", ["客服名稱", "班別", "日期", "時間", "遊戲專線", "滿意度問題1", "滿意度問題2", "對話ID", "總發話時間", "總處理時間"], rows.map((r) => [r.agent, r.shift || "", formatCustomDate(r.date), r.time, r.line, r.q1, r.q2, r.id, formatDurationClock(r.speakDuration), formatDurationClock(r.handleDuration)]));
             createSheet("總處理時間", SUMMARY_HEADERS, buildSummaryRowsFromSource(rows, "handle").map((r) => SUMMARY_HEADERS.map((h) => ["客服名稱", "班別"].includes(h) ? (r[h] || "") : Number(formatToHours(r[h])))));
             createSheet("總發話時間", SUMMARY_HEADERS, buildSummaryRowsFromSource(rows, "speak").map((r) => SUMMARY_HEADERS.map((h) => ["客服名稱", "班別"].includes(h) ? (r[h] || "") : Number(formatToHours(r[h])))));
             const analysisHeaders = ["客服名稱", "班別", "總通話數", "人員非常滿意度(Q1)", "人員調查率(Q1)", "問題非常滿意度(Q2)", "問題調查率(Q2)", "整體非常滿意度平均", "整體調查率平均"];
@@ -2429,13 +2465,15 @@ function App() {
             (cloudMasterStore.rows || []).forEach((r) => { if (r.agent)
                 set.add(r.agent); });
             Object.keys(effectiveRules || {}).forEach((name) => set.add(name));
+            getAllAgentsFromRules().forEach((name) => set.add(name));
         }
         else {
             const latestPeriod = viewType === "years" ? allYears[allYears.length - 1] : viewType === "months" ? allMonths[allMonths.length - 1] : allWeeks[allWeeks.length - 1];
             (cloudMasterStore.rows || []).forEach((r) => { if (r.agent && isAgentEffectiveForPeriod(r.agent, latestPeriod || r.weekKey || r.monthKey || r.yearKey, viewType, effectiveRules))
                 set.add(r.agent); });
+            getAllAgentsFromRules().forEach((name) => { if (isAgentEffectiveForPeriod(name, latestPeriod, viewType, effectiveRules))
+                set.add(name); });
         }
-        getAllAgentsFromRules().forEach((name) => set.add(name));
         return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hant"));
     }, [cloudMasterStore, getAllAgentsFromRules, includeHistoryAgents, effectiveRules, viewType, allYears, allMonths, allWeeks]);
     useEffect(() => { if (availableAgents.length && selectedTrendAgents.length === 0)
@@ -2483,16 +2521,27 @@ function App() {
             setLoginLockText("");
             setUser(cred.user);
             setSyncStatus(`登入成功，雲端資料讀取中... ${((_a = cred.user) === null || _a === void 0 ? void 0 : _a.email) || ""}`);
-            window.setTimeout(() => { const current = auth.currentUser || cred.user; if (current)
-                loadCloudBundle({ autoPreview: true, userOverride: current }); }, 0);
         }
         catch (error) {
+            const code = (error && error.code) || "";
+            console.error(error);
+            if (code === "auth/too-many-requests") {
+                setLoginError("帳號密碼不一定是錯的：Firebase 偵測到短時間內登入嘗試次數過多，暫時鎖住這個帳號的登入。請稍後幾分鐘再試，或用密碼重設信重設一次密碼即可馬上解除。");
+                return;
+            }
+            if (code === "auth/network-request-failed") {
+                setLoginError("網路連線有問題，請檢查網路後再試一次，這不是帳號密碼的問題。");
+                return;
+            }
+            if (code === "auth/user-disabled") {
+                setLoginError("這個帳號已被停用，請聯絡管理員。");
+                return;
+            }
             const next = recordLoginFailure();
             const remain = Math.max(0, SECURITY_CONFIG.maxLoginFailures - Number(next.failures || 0));
             const lockMsg = formatLockoutText(next.lockedUntil);
             setLoginLockText(lockMsg);
-            setLoginError(lockMsg || `登入失敗，請檢查帳號密碼。剩餘可嘗試 ${remain} 次。`);
-            console.error(error);
+            setLoginError(lockMsg || `登入失敗，請檢查帳號密碼。剩餘可嘗試 ${remain} 次。（錯誤代碼：${code || "未知"}）`);
         }
     };
     const handleLogout = async () => { if (firebaseReady && auth) {
@@ -2509,8 +2558,23 @@ function App() {
     const deleteShiftMonth = async (monthKey) => { if (monthKey === "default")
         return alert("default 不可刪除"); if (!window.confirm(`確定刪除 ${monthKey} 的班表設定嗎？`))
         return; const next = { ...shiftRules }; delete next[monthKey]; await saveShiftRules(next); setShiftEditorMonth("default"); };
-    const addEffectiveRule = async () => { const name = effectiveDraft.name.trim(); if (!name)
-        return alert("請輸入客服名稱"); const next = { ...effectiveRules, [name]: { start: effectiveDraft.start.trim(), end: effectiveDraft.end.trim(), note: effectiveDraft.note.trim() } }; await saveEffectiveRules(next); setEffectiveDraft({ name: "", start: "", end: "", note: "" }); alert("人員有效期間已儲存"); };
+    const addEffectiveRule = async () => {
+        const name = effectiveDraft.name.trim();
+        if (!name)
+            return alert("請輸入客服名稱");
+        const rawStart = effectiveDraft.start.trim();
+        const rawEnd = effectiveDraft.end.trim();
+        const start = normalizePeriodKeyInput(rawStart);
+        const end = normalizePeriodKeyInput(rawEnd);
+        if (rawStart && start == null)
+            return alert(`「起始」欄位看不懂這個格式：${rawStart}\n請用 2025-W09（週）、2025-11（月）或 2025（年）這種格式。`);
+        if (rawEnd && end == null)
+            return alert(`「結束」欄位看不懂這個格式：${rawEnd}\n請用 2025-W35（週）、2025-11（月）或 2025（年）這種格式。`);
+        const next = { ...effectiveRules, [name]: { start: start || "", end: end || "", note: effectiveDraft.note.trim() } };
+        await saveEffectiveRules(next);
+        setEffectiveDraft({ name: "", start: "", end: "", note: "" });
+        alert("人員有效期間已儲存");
+    };
     const editEffectiveRule = (name, rule) => setEffectiveDraft({ name, start: rule.start || "", end: rule.end || "", note: rule.note || "" });
     const deleteEffectiveRule = async (name) => { if (!window.confirm(`確定刪除「${name}」的人員有效期間設定嗎？`))
         return; const next = { ...effectiveRules }; delete next[name]; await saveEffectiveRules(next); };
