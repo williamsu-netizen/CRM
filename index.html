@@ -61,6 +61,8 @@
       .rwd-split > div:first-child{border-right:none !important;border-bottom:0.5px solid #f1f5f9}
       .tr-kpi-row{grid-template-columns:repeat(2, minmax(0,1fr))}
       .rwd-multi-col{grid-template-columns:repeat(2, minmax(0,1fr)) !important}
+      .effective-rule-row{grid-template-columns:repeat(2, minmax(0,1fr)) !important}
+      .effective-rule-submit{grid-column:span 2}
     }
     @media (max-width: 640px) {
       table{font-size:12px}
@@ -70,6 +72,7 @@
     }
     @media (max-width: 480px) {
       .rwd-multi-col{grid-template-columns:1fr !important}
+      .effective-rule-row{grid-template-columns:1fr !important}
     }
   </style>
 </head>
@@ -330,11 +333,19 @@ const normalizePeriodKeyInput = (raw) => {
     if (!v)
         return "";
     const week = v.match(/^(\d{4})-?[wW](\d{1,2})$/);
-    if (week)
+    if (week) {
+        const weekNo = Number(week[2]);
+        if (weekNo < 1 || weekNo > 53)
+            return null;
         return `${week[1]}-W${week[2].padStart(2, "0")}`;
-    const month = v.match(/^(\d{4})[-\/](\d{1,2})$/);
-    if (month)
+    }
+    const month = v.match(/^(\d{4})[-\/.](\d{1,2})$/);
+    if (month) {
+        const monthNo = Number(month[2]);
+        if (monthNo < 1 || monthNo > 12)
+            return null;
         return `${month[1]}-${month[2].padStart(2, "0")}`;
+    }
     const year = v.match(/^(\d{4})$/);
     if (year)
         return year[1];
@@ -1710,6 +1721,8 @@ function App() {
     const [isDragging, setIsDragging] = useState(false);
     const fileInputRef = useRef(null);
     const latestDetailPeriodRef = useRef("");
+    const knownTrendAgentsRef = useRef(new Set());
+    const initialCloudLoadDoneRef = useRef(false);
     const getActiveUser = useCallback((overrideUser = null) => overrideUser || user || (firebaseReady && auth ? auth.currentUser : null), [user]);
     const getAllAgentsFromRules = useCallback((rules = shiftRules) => {
         const set = new Set();
@@ -2023,6 +2036,9 @@ function App() {
                     console.error(e);
                     setSyncStatus(`登入成功，但雲端讀取失敗：${e.message || e}`);
                 }
+                finally {
+                    initialCloudLoadDoneRef.current = true;
+                }
             }
             else {
                 setSyncStatus("尚未登入");
@@ -2031,6 +2047,10 @@ function App() {
                 setPreviewRows([]);
                 setPreviewMeta(EMPTY_PREVIEW_META);
                 setValidationReport(null);
+                setSelectedTrendAgents([]);
+                setIncludeHistoryAgents(false);
+                knownTrendAgentsRef.current = new Set();
+                initialCloudLoadDoneRef.current = false;
             }
         });
         return () => unsub();
@@ -2056,6 +2076,7 @@ function App() {
             window.clearTimeout(timeoutId); events.forEach((e) => window.removeEventListener(e, resetTimer)); };
     }, [user]);
     useEffect(() => { if (!firebaseReady || !user || !db)
+        return; if (!initialCloudLoadDoneRef.current)
         return; if (!["history", "trend", "detail"].includes(activeTab))
         return; if ((cloudMasterStore.rows || []).length > 0 || cloudIndex.length > 0)
         return; loadCloudBundle({ autoPreview: false }); }, [activeTab, user]);
@@ -2476,8 +2497,12 @@ function App() {
         }
         return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hant"));
     }, [cloudMasterStore, getAllAgentsFromRules, includeHistoryAgents, effectiveRules, viewType, allYears, allMonths, allWeeks]);
-    useEffect(() => { if (availableAgents.length && selectedTrendAgents.length === 0)
-        setSelectedTrendAgents([...availableAgents]); }, [availableAgents]);
+    useEffect(() => {
+        const newlyAppeared = availableAgents.filter((name) => !knownTrendAgentsRef.current.has(name));
+        availableAgents.forEach((name) => knownTrendAgentsRef.current.add(name));
+        if (newlyAppeared.length)
+            setSelectedTrendAgents((prev) => Array.from(new Set([...prev, ...newlyAppeared])));
+    }, [availableAgents]);
     const detailRows = useMemo(() => {
         var _a, _b;
         let rows = [];
@@ -2570,6 +2595,12 @@ function App() {
             return alert(`「起始」欄位看不懂這個格式：${rawStart}\n請用 2025-W09（週）、2025-11（月）或 2025（年）這種格式。`);
         if (rawEnd && end == null)
             return alert(`「結束」欄位看不懂這個格式：${rawEnd}\n請用 2025-W35（週）、2025-11（月）或 2025（年）這種格式。`);
+        if (start && end) {
+            const startRange = keyToDateRange(start);
+            const endRange = keyToDateRange(end);
+            if (startRange && endRange && startRange.start > endRange.end)
+                return alert(`「起始」（${start}）比「結束」（${end}）還晚，請檢查一下順序。`);
+        }
         const next = { ...effectiveRules, [name]: { start: start || "", end: end || "", note: effectiveDraft.note.trim() } };
         await saveEffectiveRules(next);
         setEffectiveDraft({ name: "", start: "", end: "", note: "" });
@@ -2810,12 +2841,12 @@ function App() {
                             React.createElement("span", { style: CRM.badge("#f8fafc", "#64748b") },
                                 Object.keys(effectiveRules).length,
                                 " \u4EBA")),
-                        React.createElement("div", { className: "rwd-multi-col", style: { padding: "14px 20px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 100px", gap: "8px", borderBottom: "0.5px solid #f1f5f9" } },
+                        React.createElement("div", { className: "effective-rule-row", style: { padding: "14px 20px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 100px", gap: "8px", borderBottom: "0.5px solid #f1f5f9" } },
                             React.createElement("input", { value: effectiveDraft.name, onChange: e => setEffectiveDraft(p => ({ ...p, name: e.target.value })), placeholder: "\u5BA2\u670D\u540D\u7A31", style: CRM.input }),
                             React.createElement("input", { value: effectiveDraft.start, onChange: e => setEffectiveDraft(p => ({ ...p, start: e.target.value })), placeholder: "\u8D77\u59CB \u4F8B 2025-W09", style: CRM.input }),
                             React.createElement("input", { value: effectiveDraft.end, onChange: e => setEffectiveDraft(p => ({ ...p, end: e.target.value })), placeholder: "\u7D50\u675F \u4F8B 2025-W35", style: CRM.input }),
                             React.createElement("input", { value: effectiveDraft.note, onChange: e => setEffectiveDraft(p => ({ ...p, note: e.target.value })), placeholder: "\u5099\u8A3B", style: CRM.input }),
-                            React.createElement("button", { onClick: addEffectiveRule, style: CRM.btnPrimary }, "\u65B0\u589E/\u66F4\u65B0")),
+                            React.createElement("button", { className: "effective-rule-submit", onClick: addEffectiveRule, style: CRM.btnPrimary }, "\u65B0\u589E/\u66F4\u65B0")),
                         React.createElement("div", { style: { overflowX: "auto" } },
                             React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: "13px" } },
                                 React.createElement("thead", null,
@@ -2840,4 +2871,3 @@ ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(
 </script>
 </body>
 </html>
-
