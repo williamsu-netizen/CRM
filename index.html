@@ -85,8 +85,9 @@
 
 <!-- 護眼模式：獨立於 React 之外的全螢幕暖色濾鏡疊層 + 開關按鈕，開機/登入畫面就能用，不影響原本任何畫面邏輯。 -->
 <div id="eyecareOverlay" style="position:fixed;inset:0;z-index:2147483000;pointer-events:none;mix-blend-mode:multiply;background:rgba(255,224,153,.22);display:none;"></div>
-<button id="eyecareToggle" type="button" title="護眼模式" aria-label="護眼模式切換" aria-pressed="false" style="position:fixed;right:18px;bottom:18px;z-index:2147483001;width:44px;height:44px;border-radius:50%;border:0.5px solid #e2e8f0;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.12);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#64748b;">
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+<button id="eyecareToggle" type="button" title="護眼模式" aria-label="護眼模式切換" aria-pressed="false" style="position:fixed;right:18px;top:14px;z-index:2147483001;height:36px;padding:0 14px 0 12px;border-radius:18px;border:1px solid #e2e8f0;background:#fff;box-shadow:0 2px 10px rgba(15,23,42,.12);display:flex;align-items:center;gap:6px;cursor:pointer;color:#334155;font-family:inherit;font-size:13px;font-weight:600;">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+  <span>護眼模式</span>
 </button>
 <script>
 (function () {
