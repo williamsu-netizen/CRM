@@ -19,6 +19,25 @@
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
+    /* ── 系統統一色彩/間距 token：先套用在整體外框(頂列/側邊欄)，其餘頁面之後再逐步套用 ── */
+    :root {
+      --brand: #2563eb;
+      --brand-dark: #1d4ed8;
+      --brand-soft: #eff6ff;
+      --ink-900: #0f172a;
+      --ink-700: #334155;
+      --ink-500: #64748b;
+      --ink-400: #94a3b8;
+      --line: #e2e8f0;
+      --line-soft: #f1f5f9;
+      --surface: #fff;
+      --bg: #f8fafc;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --shadow-sm: 0 1px 2px rgba(15,23,42,.04);
+      --shadow-md: 0 4px 16px rgba(15,23,42,.06);
+    }
     body { font-family: 'Inter', 'PingFang TC', 'Microsoft JhengHei', sans-serif; }
     .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
@@ -730,6 +749,15 @@ function Icon({ name, size = 18, className = "" }) {
             React.createElement("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
             React.createElement("path", { d: "M7 10l5 5 5-5" }),
             React.createElement("path", { d: "M12 15V3" }));
+    if (name === "history")
+        return React.createElement("svg", { ...common },
+            React.createElement("path", { d: "M3 12a9 9 0 1 0 3-6.7" }),
+            React.createElement("path", { d: "M3 4v5h5" }),
+            React.createElement("path", { d: "M12 7v5l4 2" }));
+    if (name === "search")
+        return React.createElement("svg", { ...common },
+            React.createElement("circle", { cx: "11", cy: "11", r: "7" }),
+            React.createElement("path", { d: "m21 21-4.3-4.3" }));
     return React.createElement("svg", { ...common },
         React.createElement("circle", { cx: "12", cy: "12", r: "9" }));
 }
@@ -932,8 +960,12 @@ const CRM = {
 // ─── CRM TABLE: shared detail rows component ──────────────────────────────────
 function CrmTableRows({ rows, start = 0 }) {
     const cols = ["客服名稱", "班別", "日期", "時間", "遊戲專線", "滿意度Q1", "滿意度Q2", "對話ID", "總發話時間", "總處理時間"];
+    // 固定各欄寬度比例(對話ID是UUID需要較寬,其餘欄位內容都很短),避免短內容被瀏覽器預設的自動版面硬撐開、兩側留一大片空白。
+    const colWidths = ["10%", "7%", "9%", "8%", "11%", "10%", "10%", "19%", "8%", "8%"];
+    const td0 = { ...CRM.td, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
     return (React.createElement("div", { style: { overflowX: "auto" } },
-        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: "13px" } },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: "13px", tableLayout: "fixed" } },
+            React.createElement("colgroup", null, colWidths.map((w, i) => React.createElement("col", { key: cols[i], style: { width: w } }))),
             React.createElement("thead", null,
                 React.createElement("tr", null, cols.map(c => React.createElement("th", { key: c, style: CRM.th }, c)))),
             React.createElement("tbody", null, rows.length === 0 ? (React.createElement("tr", null,
@@ -941,16 +973,16 @@ function CrmTableRows({ rows, start = 0 }) {
                 const idx = start + i;
                 const sc = CRM.SHIFT[r.shift] || { bg: "#f1f5f9", tc: "#64748b" };
                 return (React.createElement("tr", { key: `${r.id || idx}-${idx}`, style: { background: idx % 2 === 0 ? "#fff" : "#f9fafb" }, onMouseEnter: e => e.currentTarget.style.background = "#f0f9ff", onMouseLeave: e => e.currentTarget.style.background = idx % 2 === 0 ? "#fff" : "#f9fafb" },
-                    React.createElement("td", { style: { ...CRM.td, textAlign: "left", fontWeight: "500", color: "#1e293b" } }, r.agent),
-                    React.createElement("td", { style: CRM.td }, r.shift ? React.createElement("span", { style: CRM.badge(sc.bg, sc.tc) }, r.shift) : "—"),
-                    React.createElement("td", { style: CRM.td }, formatCustomDate(r.date)),
-                    React.createElement("td", { style: CRM.td }, r.time),
-                    React.createElement("td", { style: CRM.td }, r.line),
-                    React.createElement("td", { style: CRM.td }, r.q1),
-                    React.createElement("td", { style: CRM.td }, r.q2),
-                    React.createElement("td", { style: { ...CRM.td, fontSize: "11px", color: "#94a3b8", fontFamily: "monospace" } }, r.id),
-                    React.createElement("td", { style: { ...CRM.td, fontFamily: "monospace" } }, formatDurationClock(r.speakDuration)),
-                    React.createElement("td", { style: { ...CRM.td, fontFamily: "monospace" } }, formatDurationClock(r.handleDuration))));
+                    React.createElement("td", { style: { ...td0, textAlign: "left", fontWeight: "500", color: "#1e293b" } }, r.agent),
+                    React.createElement("td", { style: td0 }, r.shift ? React.createElement("span", { style: CRM.badge(sc.bg, sc.tc) }, r.shift) : "—"),
+                    React.createElement("td", { style: td0 }, formatCustomDate(r.date)),
+                    React.createElement("td", { style: td0 }, r.time),
+                    React.createElement("td", { style: td0 }, r.line),
+                    React.createElement("td", { style: td0 }, r.q1),
+                    React.createElement("td", { style: td0 }, r.q2),
+                    React.createElement("td", { style: { ...td0, textAlign: "left", fontSize: "11px", color: "#94a3b8", fontFamily: "monospace" } }, r.id),
+                    React.createElement("td", { style: { ...td0, fontFamily: "monospace" } }, formatDurationClock(r.speakDuration)),
+                    React.createElement("td", { style: { ...td0, fontFamily: "monospace" } }, formatDurationClock(r.handleDuration))));
             })))));
 }
 // ─── CRM PAGINATION ───────────────────────────────────────────────────────────
@@ -2681,20 +2713,27 @@ function App() {
                 React.createElement("button", { type: "submit", disabled: !!loginLockText, className: `w-full text-white font-bold p-3 rounded-xl ${loginLockText ? "bg-slate-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}` }, "\u767B\u5165"))));
     }
     // ── Main render ──────────────────────────────────────────────────────────────
-    const tabs = [
-        { id: "weekly", name: "預覽查詢", icon: "list" },
-        { id: "upload", name: "資料上傳", icon: "upload" },
-        { id: "cloud", name: "雲端資料", icon: "db" },
-        { id: "history", name: "歷史總覽", icon: "db" },
-        { id: "trend", name: "趨勢分析", icon: "chart" },
-        { id: "detail", name: "明細查詢", icon: "list" },
-        { id: "shift", name: "班表設定", icon: "users" },
+    const tabGroups = [
+        { label: "資料處理", items: [
+            { id: "upload", name: "資料上傳", icon: "upload" },
+            { id: "cloud", name: "雲端資料", icon: "db" },
+        ] },
+        { label: "報表分析", items: [
+            { id: "weekly", name: "預覽查詢", icon: "search" },
+            { id: "history", name: "歷史總覽", icon: "history" },
+            { id: "trend", name: "趨勢分析", icon: "chart" },
+            { id: "detail", name: "明細查詢", icon: "list" },
+        ] },
+        { label: "系統設定", items: [
+            { id: "shift", name: "班表設定", icon: "users" },
+        ] },
     ];
-    const pageStyle = { minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Inter','PingFang TC','Microsoft JhengHei',sans-serif" };
-    const topbarStyle = { background: "#fff", borderBottom: "0.5px solid #e2e8f0", padding: "0 28px", display: "flex", alignItems: "center", justifyContent: "space-between", height: "56px", position: "sticky", top: 0, zIndex: 50 };
-    const sideTabStyle = (active) => ({ display: "flex", alignItems: "center", gap: "8px", padding: "8px 14px", borderRadius: "8px", fontSize: "13px", fontWeight: active ? "600" : "400", color: active ? "#1d4ed8" : "#64748b", background: active ? "#eff6ff" : "transparent", cursor: "pointer", border: "none", fontFamily: "inherit", width: "100%", textAlign: "left", transition: "all .12s" });
-    const mainStyle = { display: "grid", gridTemplateColumns: "200px 1fr", minHeight: "calc(100vh - 56px)" };
-    const sideStyle = { background: "#fff", borderRight: "0.5px solid #e2e8f0", padding: "16px 10px", display: "flex", flexDirection: "column", gap: "2px" };
+    const pageStyle = { minHeight: "100vh", background: "var(--bg)", fontFamily: "'Inter','PingFang TC','Microsoft JhengHei',sans-serif" };
+    const topbarStyle = { background: "var(--surface)", borderBottom: "0.5px solid var(--line)", padding: "0 28px", display: "flex", alignItems: "center", justifyContent: "space-between", height: "60px", position: "sticky", top: 0, zIndex: 50 };
+    const sideTabStyle = (active) => ({ display: "flex", alignItems: "center", gap: "9px", padding: "9px 14px", borderRadius: "var(--radius-sm)", fontSize: "13px", fontWeight: active ? "600" : "500", color: active ? "var(--brand-dark)" : "var(--ink-500)", background: active ? "var(--brand-soft)" : "transparent", cursor: "pointer", border: "none", fontFamily: "inherit", width: "100%", textAlign: "left", transition: "all .12s" });
+    const sideGroupLabelStyle = { fontSize: "10.5px", fontWeight: "700", color: "var(--ink-400)", letterSpacing: ".06em", textTransform: "uppercase", padding: "14px 14px 6px" };
+    const mainStyle = { display: "grid", gridTemplateColumns: "224px 1fr", minHeight: "calc(100vh - 60px)" };
+    const sideStyle = { background: "var(--surface)", borderRight: "0.5px solid var(--line)", padding: "10px 8px 16px", display: "flex", flexDirection: "column" };
     const contentStyle = { padding: "24px 28px", display: "flex", flexDirection: "column", gap: "16px", overflow: "auto" };
     const PageHeader = ({ title, subtitle, actions }) => (React.createElement("div", { style: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "12px", marginBottom: "4px" } },
         React.createElement("div", null,
@@ -2704,10 +2743,10 @@ function App() {
     return (React.createElement("div", { style: pageStyle },
         React.createElement("div", { className: "app-topbar", style: topbarStyle },
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "12px" } },
-                React.createElement("div", { style: { width: "28px", height: "28px", borderRadius: "7px", background: "#1d4ed8", display: "flex", alignItems: "center", justifyContent: "center" } },
+                React.createElement("div", { style: { width: "30px", height: "30px", borderRadius: "var(--radius-sm)", background: "var(--brand)", display: "flex", alignItems: "center", justifyContent: "center" } },
                     React.createElement("svg", { width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "#fff", strokeWidth: "2", "aria-hidden": "true" },
                         React.createElement("path", { d: "M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9Z" }))),
-                React.createElement("span", { style: { fontSize: "14px", fontWeight: "700", color: "#0f172a" } }, "\u5BA2\u670D\u96FB\u8A71\u7D00\u9304\u9577\u671F\u89C0\u5BDF\u7CFB\u7D71")),
+                React.createElement("span", { style: { fontSize: "14px", fontWeight: "700", color: "var(--ink-900)" } }, "\u5BA2\u670D\u96FB\u8A71\u7D00\u9304\u9577\u671F\u89C0\u5BDF\u7CFB\u7D71")),
             React.createElement("div", { className: "app-topbar-actions", style: { display: "flex", alignItems: "center", gap: "10px" } },
                 React.createElement("span", { className: "app-syncstatus", style: { fontSize: "11px", color: "#94a3b8" } }, syncStatus),
                 getActiveUser() && React.createElement("span", { style: { fontSize: "12px", background: "#f1f5f9", color: "#475569", padding: "4px 10px", borderRadius: "6px", fontWeight: "500" } }, getActiveUser().email),
@@ -2726,27 +2765,27 @@ function App() {
                             React.createElement("path", { d: "M8 6V4h8v2" }),
                             React.createElement("path", { d: "M19 6l-1 14H6L5 6" })) },
                 ].map(b => (React.createElement("button", { key: b.title, title: b.title, onClick: b.fn, style: { width: "32px", height: "32px", borderRadius: "7px", background: b.bg, border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" } }, b.icon))),
-                React.createElement("button", { onClick: handleLogout, style: { padding: "5px 14px", borderRadius: "7px", border: "0.5px solid #e2e8f0", background: "#fff", color: "#475569", fontSize: "12px", fontWeight: "500", cursor: "pointer", fontFamily: "inherit" } }, "\u767B\u51FA"))),
+                React.createElement("button", { onClick: handleLogout, style: { padding: "5px 14px", borderRadius: "var(--radius-sm)", border: "0.5px solid var(--line)", background: "var(--surface)", color: "var(--ink-700)", fontSize: "12px", fontWeight: "500", cursor: "pointer", fontFamily: "inherit" } }, "\u767B\u51FA"))),
         React.createElement("div", { className: "app-main", style: mainStyle },
             React.createElement("div", { className: "app-sidebar", style: sideStyle },
-                React.createElement("div", { style: { padding: "10px 6px 14px", borderBottom: "0.5px solid #f1f5f9", marginBottom: "10px" } },
-                    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" } }, [
-                        { l: "累積年份", v: allYears.length },
-                        { l: "累積月份", v: allMonths.length },
-                        { l: "累積週數", v: allWeeks.length },
-                        { l: "目前預覽", v: previewRows.length },
-                    ].map(s => (React.createElement("div", { key: s.l, style: { background: "#f8fafc", borderRadius: "7px", padding: "8px 10px" } },
-                        React.createElement("div", { style: { fontSize: "10px", color: "#94a3b8", fontWeight: "600", letterSpacing: ".04em", textTransform: "uppercase" } }, s.l),
-                        React.createElement("div", { style: { fontSize: "18px", fontWeight: "700", color: "#0f172a", lineHeight: 1.2, marginTop: "3px" } }, s.v))))),
-                    uploadMessage && React.createElement("div", { style: { marginTop: "8px", padding: "8px 10px", background: "#f0fdf4", border: "0.5px solid #bbf7d0", borderRadius: "7px", fontSize: "11px", color: "#15803d", lineHeight: "1.5" } }, uploadMessage)),
-                tabs.map(t => (React.createElement("button", { key: t.id, className: "app-sidebar-btn", onClick: () => setActiveTab(t.id), style: sideTabStyle(activeTab === t.id) },
-                    React.createElement(Icon, { name: t.icon, size: 15 }),
-                    t.name))),
-                React.createElement("div", { style: { marginTop: "auto", padding: "10px 6px 0", borderTop: "0.5px solid #f1f5f9" } },
-                    React.createElement("div", { style: { fontSize: "10px", color: "#94a3b8", fontWeight: "600", letterSpacing: ".04em", textTransform: "uppercase", marginBottom: "4px" } }, "\u96F2\u7AEF\u6279\u6B21"),
-                    React.createElement("div", { style: { fontSize: "18px", fontWeight: "700", color: "#0f172a" } },
-                        cloudIndex.length,
-                        " \u7B46"))),
+                React.createElement("div", { style: { flex: 1, display: "flex", flexDirection: "column", gap: "2px" } },
+                    tabGroups.map(g => (React.createElement(React.Fragment, { key: g.label },
+                        React.createElement("div", { style: sideGroupLabelStyle }, g.label),
+                        g.items.map(t => (React.createElement("button", { key: t.id, className: "app-sidebar-btn", onClick: () => setActiveTab(t.id), style: sideTabStyle(activeTab === t.id) },
+                            React.createElement(Icon, { name: t.icon, size: 15 }),
+                            t.name))))))),
+                React.createElement("div", { style: { marginTop: "12px", padding: "12px 8px 0", borderTop: "0.5px solid var(--line-soft)" } },
+                    React.createElement("div", { style: sideGroupLabelStyle }, "\u8CC7\u6599\u6982\u6CC1"),
+                    React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", padding: "0 6px" } }, [
+                        { l: "\u7D2F\u7A4D\u5E74\u4EFD", v: allYears.length },
+                        { l: "\u7D2F\u7A4D\u6708\u4EFD", v: allMonths.length },
+                        { l: "\u7D2F\u7A4D\u9031\u6578", v: allWeeks.length },
+                        { l: "\u76EE\u524D\u9810\u89BD", v: previewRows.length },
+                        { l: "\u96F2\u7AEF\u6279\u6B21", v: cloudIndex.length },
+                    ].map(s => (React.createElement("div", { key: s.l, style: { background: "var(--bg)", borderRadius: "var(--radius-sm)", padding: "8px 10px" } },
+                        React.createElement("div", { style: { fontSize: "10px", color: "var(--ink-400)", fontWeight: "600", letterSpacing: ".04em", textTransform: "uppercase" } }, s.l),
+                        React.createElement("div", { style: { fontSize: "17px", fontWeight: "700", color: "var(--ink-900)", lineHeight: 1.2, marginTop: "3px" } }, s.v))))),
+                    uploadMessage && React.createElement("div", { style: { margin: "8px 6px 0", padding: "8px 10px", background: "#f0fdf4", border: "0.5px solid #bbf7d0", borderRadius: "var(--radius-sm)", fontSize: "11px", color: "#15803d", lineHeight: "1.5" } }, uploadMessage))),
             React.createElement("div", { style: contentStyle },
                 activeTab === "upload" && (React.createElement(React.Fragment, null,
                     React.createElement(PageHeader, { title: "\u8CC7\u6599\u4E0A\u50B3", subtitle: "\u652F\u63F4 CSV / XLSX / XLS\uFF0C\u53EF\u62D6\u66F3\u6216\u9EDE\u9078\u4E0A\u50B3" }),
@@ -2927,3 +2966,4 @@ ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(
 </script>
 </body>
 </html>
+
