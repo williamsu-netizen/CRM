@@ -83,6 +83,33 @@
   </div>
 </div>
 
+<!-- 護眼模式：獨立於 React 之外的全螢幕暖色濾鏡疊層 + 開關按鈕，開機/登入畫面就能用，不影響原本任何畫面邏輯。 -->
+<div id="eyecareOverlay" style="position:fixed;inset:0;z-index:2147483000;pointer-events:none;mix-blend-mode:multiply;background:rgba(255,224,153,.22);display:none;"></div>
+<button id="eyecareToggle" type="button" title="護眼模式" aria-label="護眼模式切換" aria-pressed="false" style="position:fixed;right:18px;bottom:18px;z-index:2147483001;width:44px;height:44px;border-radius:50%;border:0.5px solid #e2e8f0;background:#fff;box-shadow:0 4px 14px rgba(15,23,42,.12);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#64748b;">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+</button>
+<script>
+(function () {
+  var STORAGE_KEY = "weekly_call_project_eyecare";
+  var overlay = document.getElementById("eyecareOverlay");
+  var toggleBtn = document.getElementById("eyecareToggle");
+  function applyState(on) {
+    overlay.style.display = on ? "block" : "none";
+    toggleBtn.style.background = on ? "#fef3c7" : "#fff";
+    toggleBtn.style.color = on ? "#b45309" : "#64748b";
+    toggleBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  var saved = null;
+  try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+  applyState(saved === "1");
+  toggleBtn.addEventListener("click", function () {
+    var next = overlay.style.display === "none";
+    applyState(next);
+    try { localStorage.setItem(STORAGE_KEY, next ? "1" : "0"); } catch (e) {}
+  });
+})();
+</script>
+
 <script>
 function escapeHTML(value) {
   return String(value || '')
