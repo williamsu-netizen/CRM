@@ -10,7 +10,7 @@
 
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -317,6 +317,17 @@ const getCalendarMonthKey = (dateStr) => { if (!dateStr)
     return ""; const safe = String(dateStr).replace(/\//g, "-"); const m = safe.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); return m ? `${m[1]}-${String(m[2]).padStart(2, "0")}` : ""; };
 const getCalendarYearKey = (dateStr) => { if (!dateStr)
     return ""; const safe = String(dateStr).replace(/\//g, "-"); const m = safe.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); return m ? m[1] : ""; };
+const isValidCalendarDate = (dateStr) => {
+    const safe = String(dateStr || "").replace(/\//g, "-");
+    const m = safe.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (!m)
+        return false;
+    const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31)
+        return false;
+    const dt = new Date(y, mo - 1, d);
+    return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d;
+};
 const getPeriodKeyForDate = (dateStr, viewType) => {
     if (!dateStr)
         return "";
@@ -1015,7 +1026,7 @@ function CrmAnalysisTable({ rows }) {
 }
 // ─── CRM VALIDATION PANEL ─────────────────────────────────────────────────────
 function CrmValidationPanel({ report }) {
-    var _a, _b;
+    var _a, _b, _c, _d;
     if (!report)
         return null;
     const warns = report.warnings || [];
@@ -1032,7 +1043,7 @@ function CrmValidationPanel({ report }) {
             ].map(k => (React.createElement("div", { key: k.l, style: CRM.kpi },
                 React.createElement("div", { style: { fontSize: "10px", fontWeight: "700", color: "#94a3b8", letterSpacing: ".05em", textTransform: "uppercase", marginBottom: "6px" } }, k.l),
                 React.createElement("div", { style: { fontSize: "22px", fontWeight: "600", color: "#1e293b" } }, k.v))))),
-            React.createElement("div", { className: "rwd-multi-col", style: { display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: "8px", fontSize: "12px", color: "#64748b" } },
+            React.createElement("div", { className: "rwd-multi-col", style: { display: "grid", gridTemplateColumns: "repeat(5,minmax(0,1fr))", gap: "8px", fontSize: "12px", color: "#64748b" } },
                 React.createElement("div", { style: { background: "#f8fafc", borderRadius: "7px", padding: "10px 12px" } },
                     "\u65E5\u671F\u7BC4\u570D\uFF1A",
                     React.createElement("span", { style: { fontWeight: "600", color: "#1e293b" } }, report.dateRange || "—")),
@@ -1045,6 +1056,16 @@ function CrmValidationPanel({ report }) {
                     "\u7F3A\u5BA2\u670D\u540D\u7A31\uFF1A",
                     React.createElement("span", { style: { fontWeight: "600", color: "#1e293b" } },
                         ((_b = report.excluded) === null || _b === void 0 ? void 0 : _b.missingAgent) || 0,
+                        " \u7B46")),
+                React.createElement("div", { style: { background: "#f8fafc", borderRadius: "7px", padding: "10px 12px" } },
+                    "\u4E0D\u5728\u6709\u6548\u671F\u9593\uFF1A",
+                    React.createElement("span", { style: { fontWeight: "600", color: "#1e293b" } },
+                        ((_c = report.excluded) === null || _c === void 0 ? void 0 : _c.ineffective) || 0,
+                        " \u7B46")),
+                React.createElement("div", { style: { background: "#f8fafc", borderRadius: "7px", padding: "10px 12px" } },
+                    "\u6A94\u6848\u5167\u91CD\u8907\uFF1A",
+                    React.createElement("span", { style: { fontWeight: "600", color: "#1e293b" } },
+                        ((_d = report.excluded) === null || _d === void 0 ? void 0 : _d.duplicateWithinUpload) || 0,
                         " \u7B46"))),
             warns.length > 0 && (React.createElement("div", { style: { background: "#fffbeb", border: "0.5px solid #fde68a", borderRadius: "8px", padding: "12px 16px" } }, warns.map((w, i) => React.createElement("div", { key: i, style: { fontSize: "12px", color: "#92400e", lineHeight: "1.8" } },
                 "\u26A0 ",
@@ -1082,11 +1103,77 @@ function CrmHistoryTable({ periodList, viewType }) {
                     React.createElement("td", { colSpan: cols.length, style: { ...CRM.td, padding: "40px", color: "#94a3b8", textAlign: "center" } }, "\u76EE\u524D\u6C92\u6709\u7B26\u5408\u7BE9\u9078\u689D\u4EF6\u7684\u8CC7\u6599"))) : periodList.map((item, i) => (React.createElement("tr", { key: item.periodKey, style: { background: i % 2 === 0 ? "#fff" : "#f9fafb" }, onMouseEnter: e => e.currentTarget.style.background = "#f0f9ff", onMouseLeave: e => e.currentTarget.style.background = i % 2 === 0 ? "#fff" : "#f9fafb" }, cols.map(c => (React.createElement("td", { key: c.key, style: c.key === "period" ? { ...CRM.td, textAlign: "left", fontWeight: "600", color: "#1d4ed8" } : CRM.td }, c.fn(item, item))))))))))));
 }
 // ─── Period filter panel: shortcut buttons + custom range (A+C design) ────────
-function PeriodFilterPanel({ allYears, allMonths, allWeeks, cloudMasterStore, selectedYears, selectedMonths, selectedWeeks, setSelectedYears, setSelectedMonths, setSelectedWeeks, viewType, setViewType }) {
-    const [activeShortcut, setActiveShortcut] = useState("recent4");
-    const [fromKey, setFromKey] = useState("");
-    const [toKey, setToKey] = useState("");
-    const list = viewType === "years" ? allYears : viewType === "months" ? allMonths : allWeeks;
+const PERIOD_SHORTCUTS = {
+    weeks: [
+        { key: "recent1", label: "最近 1 週", n: 1 },
+        { key: "recent4", label: "最近 4 週", n: 4 },
+        { key: "recent8", label: "最近 8 週", n: 8 },
+        { key: "recent13", label: "最近 13 週", n: 13 },
+        { key: "all", label: "全部週次", n: null },
+        { key: "custom", label: "自訂範圍", n: null },
+    ],
+    months: [
+        { key: "recent1", label: "最近 1 個月", n: 1 },
+        { key: "recent3", label: "最近 3 個月", n: 3 },
+        { key: "recent6", label: "最近 6 個月", n: 6 },
+        { key: "thisYear", label: "今年度", n: null },
+        { key: "all", label: "全部月份", n: null },
+        { key: "custom", label: "自訂範圍", n: null },
+    ],
+    years: [
+        { key: "recent2", label: "最近 2 年", n: 2 },
+        { key: "all", label: "全部年份", n: null },
+        { key: "custom", label: "自訂範圍", n: null },
+    ],
+};
+const DEFAULT_PERIOD_FILTERS = {
+    weeks: { shortcut: "recent4", customFrom: "", customTo: "" },
+    months: { shortcut: "recent3", customFrom: "", customTo: "" },
+    years: { shortcut: "recent2", customFrom: "", customTo: "" },
+};
+const sliceListByRange = (list, from, to) => {
+    if (!list.length)
+        return [];
+    const fi = list.indexOf(from), ti = list.indexOf(to);
+    if (fi < 0 || ti < 0)
+        return [];
+    return list.slice(Math.min(fi, ti), Math.max(fi, ti) + 1);
+};
+const resolveCustomPeriodRange = (filterState, list) => {
+    const wantFrom = filterState.customFrom, wantTo = filterState.customTo;
+    if (!wantFrom || !wantTo)
+        return { from: list[0], to: list[list.length - 1], resolution: "no-overlap" };
+    const lo = wantFrom <= wantTo ? wantFrom : wantTo;
+    const hi = wantFrom <= wantTo ? wantTo : wantFrom;
+    const surviving = list.filter((k) => k >= lo && k <= hi);
+    if (surviving.length) {
+        const resolution = surviving[0] === wantFrom && surviving[surviving.length - 1] === wantTo ? "exact" : "clamped";
+        return { from: surviving[0], to: surviving[surviving.length - 1], resolution };
+    }
+    return { from: list[0], to: list[list.length - 1], resolution: "no-overlap" };
+};
+// 每次都當場依「目前選的是哪個快捷鍵/自訂範圍」加上「目前實際有哪些週期」重新算出結果，
+// 不維護任何需要手動同步的中間狀態，避免資料更新後選取範圍過期，也避免切換週/月/年時互相污染。
+const resolvePeriodRange = (viewType, filterState, list) => {
+    if (!list.length)
+        return { from: "", to: "", resolution: "exact" };
+    const last = list[list.length - 1];
+    if (filterState.shortcut === "custom")
+        return resolveCustomPeriodRange(filterState, list);
+    const shortcuts = PERIOD_SHORTCUTS[viewType] || PERIOD_SHORTCUTS.weeks;
+    const sc = shortcuts.find((s) => s.key === filterState.shortcut) || shortcuts[0];
+    if (sc.key === "all")
+        return { from: list[0], to: last, resolution: "exact" };
+    if (sc.key === "thisYear") {
+        const thisY = String(new Date().getFullYear());
+        const inYear = list.filter((k) => k.startsWith(thisY));
+        return inYear.length ? { from: inYear[0], to: inYear[inYear.length - 1], resolution: "exact" } : { from: list[0], to: last, resolution: "no-overlap" };
+    }
+    if (sc.n)
+        return { from: list[Math.max(0, list.length - sc.n)], to: last, resolution: "exact" };
+    return { from: list[0], to: last, resolution: "exact" };
+};
+function PeriodFilterPanel({ viewType, setViewType, list, filterState, range, selectedCount, onPickShortcut, onPickCustomRange }) {
     const fmtKey = useCallback((k) => {
         if (viewType === "weeks")
             return formatWeekKeyZh(k);
@@ -1094,121 +1181,35 @@ function PeriodFilterPanel({ allYears, allMonths, allWeeks, cloudMasterStore, se
             return formatMonthDisplay(k);
         return formatYearDisplay(k);
     }, [viewType]);
-    const SHORTCUTS = useMemo(() => {
-        if (viewType === "weeks")
-            return [
-                { key: "recent1", label: "最近 1 週", n: 1 },
-                { key: "recent4", label: "最近 4 週", n: 4 },
-                { key: "recent8", label: "最近 8 週", n: 8 },
-                { key: "recent13", label: "最近 13 週", n: 13 },
-                { key: "all", label: "全部週次", n: null },
-                { key: "custom", label: "自訂範圍", n: null },
-            ];
-        if (viewType === "months")
-            return [
-                { key: "recent1", label: "最近 1 個月", n: 1 },
-                { key: "recent3", label: "最近 3 個月", n: 3 },
-                { key: "recent6", label: "最近 6 個月", n: 6 },
-                { key: "thisYear", label: "今年度", n: null },
-                { key: "all", label: "全部月份", n: null },
-                { key: "custom", label: "自訂範圍", n: null },
-            ];
-        return [
-            { key: "recent2", label: "最近 2 年", n: 2 },
-            { key: "all", label: "全部年份", n: null },
-            { key: "custom", label: "自訂範圍", n: null },
-        ];
-    }, [viewType]);
-    const applyRange = useCallback((from, to, sc, curList) => {
-        const L = curList || list;
-        const fi = L.indexOf(from);
-        const ti = L.indexOf(to);
-        if (fi < 0 || ti < 0)
-            return;
-        const slice = L.slice(Math.min(fi, ti), Math.max(fi, ti) + 1);
-        if (viewType === "weeks") {
-            const ys = Array.from(new Set(slice.map(w => { var _a, _b; return (_b = (_a = cloudMasterStore.weeks) === null || _a === void 0 ? void 0 : _a[w]) === null || _b === void 0 ? void 0 : _b.year; }).filter(Boolean)));
-            const ms = Array.from(new Set(slice.map(w => { var _a, _b; return (_b = (_a = cloudMasterStore.weeks) === null || _a === void 0 ? void 0 : _a[w]) === null || _b === void 0 ? void 0 : _b.month; }).filter(Boolean)));
-            setSelectedYears(ys);
-            setSelectedMonths(ms);
-            setSelectedWeeks(slice);
-        }
-        else if (viewType === "months") {
-            const ys = Array.from(new Set(slice.map(m => m.slice(0, 4))));
-            setSelectedYears(ys);
-            setSelectedMonths(slice);
-            setSelectedWeeks(allWeeks.filter(w => { var _a; const it = (_a = cloudMasterStore.weeks) === null || _a === void 0 ? void 0 : _a[w]; return it && slice.includes(it.month); }));
-        }
-        else {
-            setSelectedYears(slice);
-            setSelectedMonths(allMonths.filter(m => slice.includes(m.slice(0, 4))));
-            setSelectedWeeks(allWeeks.filter(w => { var _a; const it = (_a = cloudMasterStore.weeks) === null || _a === void 0 ? void 0 : _a[w]; return it && slice.includes(it.year); }));
-        }
-    }, [viewType, list, cloudMasterStore, allWeeks, allMonths, setSelectedYears, setSelectedMonths, setSelectedWeeks]);
-    const resolveShortcut = useCallback((sc, curList) => {
-        const L = curList || list;
-        if (!L.length)
-            return { from: "", to: "" };
-        const last = L[L.length - 1];
-        if (sc.key === "all")
-            return { from: L[0], to: last };
-        if (sc.key === "thisYear") {
-            const thisY = String(new Date().getFullYear());
-            const inYear = L.filter(m => m.startsWith(thisY));
-            return inYear.length ? { from: inYear[0], to: inYear[inYear.length - 1] } : { from: L[0], to: last };
-        }
-        if (sc.n) {
-            const from = L[Math.max(0, L.length - sc.n)];
-            return { from, to: last };
-        }
-        return { from: L[0], to: last };
-    }, [list]);
-    useEffect(() => {
-        if (!list.length)
-            return;
-        const defaultSc = SHORTCUTS.find(s => s.key === activeShortcut) || SHORTCUTS[0];
-        const { from, to } = resolveShortcut(defaultSc, list);
-        setFromKey(from);
-        setToKey(to);
-        if (defaultSc.key !== "custom")
-            applyRange(from, to, defaultSc, list);
-    }, [viewType, list.length]);
+    const shortcuts = PERIOD_SHORTCUTS[viewType] || PERIOD_SHORTCUTS.weeks;
+    const activeShortcut = filterState.shortcut;
+    const fromKey = range.from;
+    const toKey = range.to;
     const handleShortcut = (sc) => {
-        setActiveShortcut(sc.key);
-        if (sc.key === "custom")
+        if (sc.key === "custom") {
+            // 只是切換成「自訂範圍」模式，先用目前實際顯示的區間當作起點，之後使用者再自行調整。
+            onPickCustomRange(viewType, fromKey, toKey);
             return;
-        const { from, to } = resolveShortcut(sc);
-        setFromKey(from);
-        setToKey(to);
-        applyRange(from, to, sc);
+        }
+        onPickShortcut(viewType, sc.key);
     };
     const handleFromChange = (val) => {
-        setFromKey(val);
-        setActiveShortcut("custom");
         const fi = list.indexOf(val);
         const ti = list.indexOf(toKey);
         const safeToKey = fi > ti ? val : toKey;
-        setToKey(safeToKey);
-        applyRange(val, safeToKey, { key: "custom" });
+        onPickCustomRange(viewType, val, safeToKey);
     };
     const handleToChange = (val) => {
-        setToKey(val);
-        setActiveShortcut("custom");
         const fi = list.indexOf(fromKey);
         const ti = list.indexOf(val);
         const safeFromKey = ti < fi ? val : fromKey;
-        setFromKey(safeFromKey);
-        applyRange(safeFromKey, val, { key: "custom" });
+        onPickCustomRange(viewType, safeFromKey, val);
     };
-    const selectedCount = viewType === "years" ? selectedYears.length : viewType === "months" ? selectedMonths.length : selectedWeeks.length;
     const unit = viewType === "years" ? "年" : viewType === "months" ? "個月" : "週";
-    const rangeCount = useMemo(() => {
-        if (!fromKey || !toKey)
-            return 0;
-        const fi = list.indexOf(fromKey);
-        const ti = list.indexOf(toKey);
-        return fi >= 0 && ti >= 0 ? Math.abs(ti - fi) + 1 : 0;
-    }, [fromKey, toKey, list]);
+    const rangeCount = fromKey && toKey ? Math.abs(list.indexOf(toKey) - list.indexOf(fromKey)) + 1 : 0;
+    const resolutionHint = activeShortcut === "custom" && range.resolution === "clamped" ? "自訂範圍部分週期目前無資料，已自動收斂顯示"
+        : activeShortcut === "custom" && range.resolution === "no-overlap" ? "自訂範圍目前完全無資料，暫顯示全部"
+            : "";
     return (React.createElement("div", { className: "tr-panel p-5 space-y-4" },
         React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" } },
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: "8px" } },
@@ -1224,7 +1225,7 @@ function PeriodFilterPanel({ allYears, allMonths, allWeeks, cloudMasterStore, se
                 React.createElement("button", { type: "button", onClick: () => setViewType("years"), className: `tr-ptab${viewType === "years" ? " on" : ""}` }, "\u5E74"))),
         React.createElement("div", { className: "tr-fbox" },
             React.createElement("div", { style: { fontSize: "11px", fontWeight: "500", color: "#94a3b8", marginBottom: "8px", userSelect: "none" } }, "\u5FEB\u901F\u9078\u53D6"),
-            React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } }, list.length === 0 ? (React.createElement("span", { style: { fontSize: "12px", color: "#94a3b8" } }, "\u96F2\u7AEF\u5C1A\u7121\u8CC7\u6599")) : SHORTCUTS.map(sc => (React.createElement("button", { key: sc.key, type: "button", onClick: () => handleShortcut(sc), style: {
+            React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } }, list.length === 0 ? (React.createElement("span", { style: { fontSize: "12px", color: "#94a3b8" } }, "\u96F2\u7AEF\u5C1A\u7121\u8CC7\u6599")) : shortcuts.map(sc => (React.createElement("button", { key: sc.key, type: "button", onClick: () => handleShortcut(sc), style: {
                     display: "inline-flex", alignItems: "center", gap: "4px",
                     padding: "5px 14px", borderRadius: "20px", fontSize: "13px", cursor: "pointer",
                     fontFamily: "inherit", whiteSpace: "nowrap", transition: "all .15s",
@@ -1247,7 +1248,8 @@ function PeriodFilterPanel({ allYears, allMonths, allWeeks, cloudMasterStore, se
                     "\u5171 ",
                     rangeCount,
                     " ",
-                    unit))))));
+                    unit)),
+                resolutionHint && (React.createElement("span", { style: { fontSize: "12px", color: "#d97706", whiteSpace: "nowrap" } }, resolutionHint))))));
 }
 // ─── TrendPanel: Professional CRM UI ─────────────────────────────────────────
 function TrendPanel({ periodList, viewType, availableAgents, effectiveRules, includeHistoryAgents, setIncludeHistoryAgents, selectedTrendAgents, setSelectedTrendAgents, selectedMetric, setSelectedMetric, eventList, addEvent, deleteEvent }) {
@@ -1709,9 +1711,13 @@ function App() {
     const [selectedMetric, setSelectedMetric] = useState("overallVerySatAvg");
     const [selectedTrendAgents, setSelectedTrendAgents] = useState([]);
     const [includeHistoryAgents, setIncludeHistoryAgents] = useState(false);
-    const [selectedYears, setSelectedYears] = useState([]);
-    const [selectedMonths, setSelectedMonths] = useState([]);
-    const [selectedWeeks, setSelectedWeeks] = useState([]);
+    const [periodFilters, setPeriodFilters] = useState(DEFAULT_PERIOD_FILTERS);
+    const handlePeriodShortcut = useCallback((scope, key) => {
+        setPeriodFilters((prev) => ({ ...prev, [scope]: { shortcut: key, customFrom: "", customTo: "" } }));
+    }, []);
+    const handlePeriodCustomRange = useCallback((scope, from, to) => {
+        setPeriodFilters((prev) => ({ ...prev, [scope]: { shortcut: "custom", customFrom: from, customTo: to } }));
+    }, []);
     const [detailMode, setDetailMode] = useState("weeks");
     const [detailKey, setDetailKey] = useState("");
     const [previewPage, setPreviewPage] = useState(1);
@@ -1732,9 +1738,6 @@ function App() {
     const getShiftInfoFromRules = useCallback((rules, agentName, monthKey, existingShift = "") => {
         const activeRules = rules || EMPTY_SHIFT_RULES;
         const normalizedMonth = normalizeMonthKey(monthKey);
-        const specialShift = getSpecialShiftOverride(agentName, normalizedMonth);
-        if (specialShift)
-            return { shift: specialShift, source: "專案特殊規則" };
         const monthRules = activeRules[normalizedMonth];
         if (monthRules) {
             for (const [shift, names] of Object.entries(monthRules)) {
@@ -1742,6 +1745,9 @@ function App() {
                     return { shift, source: "月份班表" };
             }
         }
+        const specialShift = getSpecialShiftOverride(agentName, normalizedMonth);
+        if (specialShift)
+            return { shift: specialShift, source: "專案特殊規則" };
         const defaultRules = activeRules.default || EMPTY_SHIFT_RULES.default;
         for (const [shift, names] of Object.entries(defaultRules)) {
             if ((names || []).includes(agentName))
@@ -1944,9 +1950,6 @@ function App() {
             const nextYears = Object.keys(years).sort();
             const nextMonths = Object.keys(months).sort();
             const nextWeeks = Object.keys(weeks).sort();
-            setSelectedYears((prev) => { const kept = prev.filter((x) => nextYears.includes(x)); const missing = nextYears.filter((x) => !kept.includes(x)); return [...kept, ...missing]; });
-            setSelectedMonths((prev) => { const kept = prev.filter((x) => nextMonths.includes(x)); const missing = nextMonths.filter((x) => !kept.includes(x)); return [...kept, ...missing]; });
-            setSelectedWeeks((prev) => { const kept = prev.filter((x) => nextWeeks.includes(x)); const missing = nextWeeks.filter((x) => !kept.includes(x)); return [...kept, ...missing]; });
             const latestAvailablePeriod = nextWeeks.length ? nextWeeks[nextWeeks.length - 1] : nextMonths.length ? nextMonths[nextMonths.length - 1] : nextYears.length ? nextYears[nextYears.length - 1] : "";
             const hasNewerPeriod = latestAvailablePeriod && latestAvailablePeriod !== latestDetailPeriodRef.current;
             latestDetailPeriodRef.current = latestAvailablePeriod;
@@ -2099,6 +2102,8 @@ function App() {
             if (direction !== "傳入" || !agent)
                 continue;
             const { date, time } = parseDateTimeValue(data.datetime);
+            if (!date || !isValidCalendarDate(date))
+                continue;
             const monthKey = getCalendarMonthKey(date);
             const yearKey = getCalendarYearKey(date);
             const weekInfo = getWeekInfo(date, time || "00:00:00");
@@ -2111,9 +2116,10 @@ function App() {
         return dedupeRows(detailRows).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
     };
     const buildValidationReport = (rawRows = [], validRows = [], previewRowsForReport = [], sourceName = "目前資料") => {
-        const excluded = { notIncoming: 0, missingAgent: 0, missingDate: 0, ineffective: 0 };
+        const excluded = { notIncoming: 0, missingAgent: 0, missingDate: 0, ineffective: 0, duplicateWithinUpload: 0 };
         const rawWeekMap = {}, validWeekMap = {}, previewWeekMap = {}, monthMap = {};
         const validDates = [];
+        const seenKeysThisUpload = new Set();
         rawRows.forEach((raw) => {
             const data = getRowValueByAliases(raw);
             const direction = String(data.direction || "").trim();
@@ -2129,10 +2135,27 @@ function App() {
                     rawWeekMap[weekInfo.weekKey] = { count: 0, label: weekInfo.weekLabel };
                 rawWeekMap[weekInfo.weekKey].count += 1;
             }
-            if (!agent)
+            if (!agent) {
                 excluded.missingAgent += 1;
-            if (!date)
+                return;
+            }
+            if (!date || !isValidCalendarDate(date)) {
                 excluded.missingDate += 1;
+                return;
+            }
+            const monthKey = getCalendarMonthKey(date);
+            const yearKey = getCalendarYearKey(date);
+            if (!isAgentEffectiveForRow(agent, { weekKey: (weekInfo === null || weekInfo === void 0 ? void 0 : weekInfo.weekKey) || "", monthKey, yearKey }, effectiveRules)) {
+                excluded.ineffective += 1;
+                return;
+            }
+            const sat = extractSatisfaction(data.tags);
+            const dupKey = makeRowUniqueKey({ id: String(data.dialogId || "").trim(), agent, date, time, line: normalizeLineName(data.line), q1: sat.q1, q2: sat.q2 });
+            if (seenKeysThisUpload.has(dupKey)) {
+                excluded.duplicateWithinUpload += 1;
+                return;
+            }
+            seenKeysThisUpload.add(dupKey);
         });
         validRows.forEach((r) => {
             if (r.date)
@@ -2163,9 +2186,13 @@ function App() {
             warnings.push(`有效資料含 ${missingWeeks.map((w) => formatWeekKeyZh(w.weekKey)).join("、")}，但目前預覽沒有顯示。`);
         monthStats.filter((m) => !m.ok).forEach((m) => warnings.push(`${formatMonthDisplay(m.monthKey)} 目前不是完整月份資料，應抓 ${m.expectedRange}。`));
         if (excluded.missingAgent > 0)
-            warnings.push(`有 ${excluded.missingAgent} 筆傳入資料缺少客服名稱，已排除統計。`);
+            warnings.push(`有 ${excluded.missingAgent} 筆傳入資料缺少客服名稱，已排除，不會同步到雲端。`);
         if (excluded.missingDate > 0)
-            warnings.push(`有 ${excluded.missingDate} 筆傳入資料缺少日期，可能無法判斷週次。`);
+            warnings.push(`有 ${excluded.missingDate} 筆傳入資料缺少日期或日期格式錯誤，已排除，不會同步到雲端。`);
+        if (excluded.ineffective > 0)
+            warnings.push(`有 ${excluded.ineffective} 筆資料因客服已超出「人員有效期間」，已排除。`);
+        if (excluded.duplicateWithinUpload > 0)
+            warnings.push(`同一份檔案內有 ${excluded.duplicateWithinUpload} 筆重複資料，已排除。`);
         const sortedDates = validDates.filter(Boolean).sort();
         return { sourceName, rawCount: rawRows.length, incomingCount: rawRows.length - excluded.notIncoming, validCount: validRows.length, previewCount: previewRowsForReport.length, excluded, dateRange: sortedDates.length ? `${formatCustomDate(sortedDates[0])}～${formatCustomDate(sortedDates[sortedDates.length - 1])}` : "-", weekStats, monthStats, warnings };
     };
@@ -2264,6 +2291,8 @@ function App() {
                 if (!doc.exists)
                     continue;
                 const data = { id: doc.id, ...doc.data() };
+                if (data.deleted)
+                    continue;
                 if (!firstDocData)
                     firstDocData = data;
                 rows = rows.concat(await fetchRowsFromReportDoc(data));
@@ -2419,12 +2448,16 @@ function App() {
     const allYears = useMemo(() => Object.keys(cloudMasterStore.years || {}).sort(), [cloudMasterStore]);
     const allMonths = useMemo(() => Object.keys(cloudMasterStore.months || {}).sort(), [cloudMasterStore]);
     const allWeeks = useMemo(() => Object.keys(cloudMasterStore.weeks || {}).sort(), [cloudMasterStore]);
-    useEffect(() => { if (allYears.length && selectedYears.length === 0)
-        setSelectedYears([...allYears]); }, [allYears]);
-    useEffect(() => { const months = allMonths.filter((m) => selectedYears.length === 0 || selectedYears.includes(m.slice(0, 4))); if (months.length && selectedMonths.length === 0)
-        setSelectedMonths([...months]); }, [allMonths, selectedYears]);
-    useEffect(() => { const weeks = allWeeks.filter((w) => { var _a; const item = (_a = cloudMasterStore.weeks) === null || _a === void 0 ? void 0 : _a[w]; return item && (selectedYears.length ? selectedYears.includes(item.year) : true); }); if (weeks.length && selectedWeeks.length === 0)
-        setSelectedWeeks([...weeks]); }, [allWeeks, selectedYears]);
+    // 目前這個 viewType 對應的「已選期間」不再是需要手動維護的狀態，而是每次都用
+    // periodFilters（每個維度各自的篩選意圖）+ 目前實際可用的週/月/年清單當場算出來，
+    // 資料更新後自然套用最新結果，切換週/月/年也不會互相污染。
+    const activePeriod = useMemo(() => {
+        const list = viewType === "years" ? allYears : viewType === "months" ? allMonths : allWeeks;
+        const filterState = periodFilters[viewType] || DEFAULT_PERIOD_FILTERS[viewType];
+        const range = resolvePeriodRange(viewType, filterState, list);
+        const slice = sliceListByRange(list, range.from, range.to);
+        return { list, range, slice };
+    }, [viewType, periodFilters, allYears, allMonths, allWeeks]);
     useEffect(() => { if (!detailKey) {
         if (detailMode === "weeks" && allWeeks.length)
             setDetailKey(allWeeks[allWeeks.length - 1]);
@@ -2437,26 +2470,21 @@ function App() {
         const sourceRows = cloudMasterStore.rows || [];
         if (!sourceRows.length)
             return [];
-        if (viewType === "weeks" && !selectedWeeks.length)
-            return [];
-        if (viewType === "months" && (!selectedYears.length || !selectedMonths.length))
-            return [];
-        if (viewType === "years" && !selectedYears.length)
+        if (!activePeriod.slice.length)
             return [];
         const filteredRows = sourceRows.filter((row) => {
             if (viewType === "weeks") {
                 // 週模式只依 weekKey 過濾。不可再用 monthKey，避免 6/29～7/5 這種跨月週漏算 7 月資料。
-                return selectedWeeks.includes(row.weekKey);
+                return activePeriod.slice.includes(row.weekKey);
             }
             if (viewType === "months") {
-                // 月模式：依 date 的實際月份過濾，避免跨週資料被漏算
+                // 月模式：依 date 的實際月份過濾，避免跨週資料被漏算。月份 key 本身已內含年份，不需另外比對年份。
                 const calMonth = getCalendarMonthKey(row.date);
-                const calYear = getCalendarYearKey(row.date);
-                return selectedYears.includes(calYear) && selectedMonths.includes(calMonth);
+                return activePeriod.slice.includes(calMonth);
             }
             // 年模式：依 date 的實際年份過濾
             const calYear = getCalendarYearKey(row.date);
-            return selectedYears.includes(calYear);
+            return activePeriod.slice.includes(calYear);
         });
         const groups = {};
         filteredRows.forEach((row) => {
@@ -2479,7 +2507,7 @@ function App() {
                 return buildPeriodSummary(rows, key, key, { year: getCalendarYearKey(first.date), month: key }, shiftRules, effectiveRules, "months");
             return buildPeriodSummary(rows, key, key, { year: key }, shiftRules, effectiveRules, "years");
         });
-    }, [cloudMasterStore.rows, viewType, selectedYears, selectedMonths, selectedWeeks, buildPeriodSummary, shiftRules, effectiveRules]);
+    }, [cloudMasterStore.rows, viewType, activePeriod, buildPeriodSummary, shiftRules, effectiveRules]);
     const availableAgents = useMemo(() => {
         const set = new Set();
         if (includeHistoryAgents) {
@@ -2764,11 +2792,11 @@ function App() {
                                         React.createElement("span", { style: CRM.badge("#f0fdf4", "#15803d") }, item.insertedCount || 0))))))))))),
                 activeTab === "history" && (React.createElement(React.Fragment, null,
                     React.createElement(PageHeader, { title: "\u9577\u671F\u6B77\u53F2\u7E3D\u89BD", subtitle: "\u4F9D\u7BE9\u9078\u689D\u4EF6\u5F59\u7E3D\u5404\u671F\u9593\u6574\u9AD4\u6307\u6A19" }),
-                    React.createElement(PeriodFilterPanel, { allYears: allYears, allMonths: allMonths, allWeeks: allWeeks, cloudMasterStore: cloudMasterStore, selectedYears: selectedYears, selectedMonths: selectedMonths, selectedWeeks: selectedWeeks, setSelectedYears: setSelectedYears, setSelectedMonths: setSelectedMonths, setSelectedWeeks: setSelectedWeeks, viewType: viewType, setViewType: setViewType }),
+                    React.createElement(PeriodFilterPanel, { viewType: viewType, setViewType: setViewType, list: activePeriod.list, filterState: periodFilters[viewType], range: activePeriod.range, selectedCount: activePeriod.slice.length, onPickShortcut: handlePeriodShortcut, onPickCustomRange: handlePeriodCustomRange }),
                     React.createElement(CrmHistoryTable, { periodList: periodList, viewType: viewType }))),
                 activeTab === "trend" && (React.createElement(React.Fragment, null,
                     React.createElement(PageHeader, { title: "\u8DA8\u52E2\u5206\u6790", subtitle: "\u591A\u4EBA\u6307\u6A19\u6BD4\u5C0D\u3001\u671F\u9593\u5FEB\u901F\u7BE9\u9078\u3001\u6392\u540D\u8207\u660E\u7D30" }),
-                    React.createElement(PeriodFilterPanel, { allYears: allYears, allMonths: allMonths, allWeeks: allWeeks, cloudMasterStore: cloudMasterStore, selectedYears: selectedYears, selectedMonths: selectedMonths, selectedWeeks: selectedWeeks, setSelectedYears: setSelectedYears, setSelectedMonths: setSelectedMonths, setSelectedWeeks: setSelectedWeeks, viewType: viewType, setViewType: setViewType }),
+                    React.createElement(PeriodFilterPanel, { viewType: viewType, setViewType: setViewType, list: activePeriod.list, filterState: periodFilters[viewType], range: activePeriod.range, selectedCount: activePeriod.slice.length, onPickShortcut: handlePeriodShortcut, onPickCustomRange: handlePeriodCustomRange }),
                     React.createElement(TrendPanel, { periodList: periodList, viewType: viewType, availableAgents: availableAgents, effectiveRules: effectiveRules, includeHistoryAgents: includeHistoryAgents, setIncludeHistoryAgents: setIncludeHistoryAgents, selectedTrendAgents: selectedTrendAgents, setSelectedTrendAgents: setSelectedTrendAgents, selectedMetric: selectedMetric, setSelectedMetric: setSelectedMetric, eventList: eventList, addEvent: addEvent, deleteEvent: deleteEvent }))),
                 activeTab === "detail" && (React.createElement(React.Fragment, null,
                     React.createElement(PageHeader, { title: "\u660E\u7D30\u67E5\u8A62", subtitle: `共 ${detailRows.length} 筆`, actions: [
